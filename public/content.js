@@ -12,8 +12,10 @@ const SELECTORS = {
   chatRow: '[role="row"]',
   // Message input box - broadened to handle Lexical variations
   messageBox: 'footer div[contenteditable="true"][data-tab="10"], div.lexical-rich-text-input div[contenteditable="true"]',
+  // Caption box in attachment preview
+  captionBox: 'div[contenteditable="true"][data-placeholder="Add a caption"], div[contenteditable="true"].lexical-rich-text-input, div[aria-label="Add a caption"], div[data-tab="10"][contenteditable="true"]',
   // Send button (appears after typing or in attachment preview)
-  sendBtn: 'span[data-icon="send"], span[data-icon="wds-ic-send-filled"], button[aria-label="Send"]',
+  sendBtn: 'span[data-icon="send"], span[data-icon="wds-ic-send-filled"], button[aria-label="Send"], div[role="button"] span[data-icon="send"]',
   // Attach button (the plus icon)
   attachBtn: 'button[data-tab="10"][aria-label="Attach"]',
   // File inputs
@@ -141,7 +143,7 @@ async function injectMessage(text) {
   return true;
 }
 
-async function handleAttachment(attachment) {
+async function handleAttachment(attachment, caption = "") {
   if (!attachment || !attachment.dataUrl) {
     console.log(`[WA Auto] No attachment for this contact`);
     return true;
@@ -158,7 +160,7 @@ async function handleAttachment(attachment) {
   
   console.log(`[WA Auto] Clicking attach button`);
   attachBtn.click();
-  await sleep(1000);
+  await sleep(2000); // Wait for inputs to be added to DOM
 
   // Find all file inputs in the footer
   const inputs = Array.from(document.querySelectorAll(SELECTORS.fileInputs));
@@ -167,7 +169,7 @@ async function handleAttachment(attachment) {
   let fileInput;
   if (isImage) {
     // Photos & Videos input usually has image/* in accept
-    fileInput = inputs.find(i => i.accept && i.accept.includes('image'));
+    fileInput = inputs.find(i => i.accept && i.accept.includes('image/'));
   } else {
     // Documents input usually has * in accept or doesn't include image
     fileInput = inputs.find(i => i.accept === '*' || (i.accept && !i.accept.includes('image')) || !i.accept);
@@ -193,6 +195,23 @@ async function handleAttachment(attachment) {
   console.log(`[WA Auto] File attached to ${isImage ? 'Photos & Video' : 'Document'} input`);
 
   await sleep(5000); // Wait for upload preview to load and become interactive
+
+  // Inject caption if provided
+  if (caption) {
+    console.log(`[WA Auto] Injecting caption into preview...`);
+    const captionBox = await waitForElement(SELECTORS.captionBox);
+    if (captionBox) {
+      captionBox.click();
+      await sleep(500);
+      captionBox.focus();
+      document.execCommand('insertText', false, caption);
+      captionBox.dispatchEvent(new Event('input', { bubbles: true }));
+      console.log(`[WA Auto] Caption injected`);
+      await sleep(1000);
+    } else {
+      console.warn(`[WA Auto] Caption box not found in preview`);
+    }
+  }
 
   console.log(`[WA Auto] Looking for send button in attachment preview...`);
   // Precise selector based on user feedback and DOM observation
@@ -233,10 +252,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (!phone) throw new Error("Phone number missing in request data");
         
         await searchAndOpenChat(phone);
-        await injectMessage(message);
 
         if (attachment) {
-          await handleAttachment(attachment);
+          // Send attachment with message as caption in one go
+          await handleAttachment(attachment, message);
+        } else {
+          // Send message only
+          await injectMessage(message);
         }
 
         console.log(`[WA Auto] Successfully processed contact: ${phone}`);
