@@ -78,7 +78,14 @@ async function searchAndOpenChat(phone) {
 }
 
 async function injectMessage(text) {
-  console.log(`[WA Auto] Step 2: Injecting message text: ${text.substring(0, 20)}...`);
+  const safeText = text || "";
+  console.log(`[WA Auto] Step 2: Injecting message text (len: ${safeText.length}): ${safeText.substring(0, 20)}...`);
+  
+  if (!safeText) {
+    console.warn("[WA Auto] No message text to inject");
+    return true;
+  }
+
   const messageBox = await waitForElement(SELECTORS.messageBox);
   if (!messageBox) throw new Error("Message input box not found");
 
@@ -94,7 +101,7 @@ async function injectMessage(text) {
   
   // Inject text using insertText which is best for Lexical/React editors
   console.log(`[WA Auto] Attempting to inject text via execCommand...`);
-  document.execCommand('insertText', false, text);
+  document.execCommand('insertText', false, safeText);
   
   // Dispatch input event to trigger React state update
   messageBox.dispatchEvent(new Event('input', { bubbles: true }));
@@ -106,7 +113,7 @@ async function injectMessage(text) {
   if (currentText.length === 0) {
     console.warn(`[WA Auto] execCommand failed to show text, trying fallback injection...`);
     // Fallback: Set textContent directly and dispatch events
-    messageBox.textContent = text;
+    messageBox.textContent = safeText;
     messageBox.dispatchEvent(new Event('input', { bubbles: true }));
     messageBox.dispatchEvent(new Event('change', { bubbles: true }));
   }
@@ -193,10 +200,14 @@ async function clickSend() {
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "process_row") {
-    console.log(`[WA Auto] Received process_row command for: ${request.data.phone}`);
+    console.log(`[WA Auto] Received process_row command`);
+    console.log(`[WA Auto] Data:`, JSON.stringify(request.data));
+    
     (async () => {
       try {
         const { phone, message, attachment } = request.data;
+        
+        if (!phone) throw new Error("Phone number missing in request data");
         
         await searchAndOpenChat(phone);
         await injectMessage(message);

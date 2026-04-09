@@ -42,6 +42,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true;
 });
 
+function parseTemplate(template, contact) {
+  if (!template) return "";
+  return template
+    .replace(/{{name}}/g, contact.name || "")
+    .replace(/{{mobile}}/g, contact.phone || "")
+    .replace(/{{sr_no}}/g, contact.sr_no || "");
+}
+
 async function processNext() {
   if (status !== "running") {
     console.log(`[BG] processNext aborted: status is ${status}`);
@@ -57,6 +65,12 @@ async function processNext() {
   }
 
   const contact = queue[currentIndex];
+  
+  // Ensure message is populated from template if missing
+  if (!contact.message && contact.message_template) {
+    contact.message = parseTemplate(contact.message_template, contact);
+  }
+  
   console.log(`[BG] Processing contact ${currentIndex + 1}/${queue.length}: ${contact.phone}`);
   
   // Find WhatsApp tab

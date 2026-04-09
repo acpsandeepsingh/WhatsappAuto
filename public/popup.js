@@ -83,6 +83,7 @@ document.addEventListener('DOMContentLoaded', () => {
           console.log("[Popup] Starting new queue from storage");
           chrome.storage.local.get(['contacts', 'settings'], (data) => {
             if (data.contacts && data.contacts.length > 0) {
+              console.log(`[Popup] Sending ${data.contacts.length} contacts to background`);
               chrome.runtime.sendMessage({ 
                 action: "start_queue", 
                 contacts: data.contacts, 
