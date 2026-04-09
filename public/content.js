@@ -18,8 +18,8 @@ const SELECTORS = {
   sendBtn: 'span[data-icon="send"], span[data-icon="wds-ic-send-filled"], button[aria-label="Send"], div[role="button"] span[data-icon="send"]',
   // Attach button (the plus icon)
   attachBtn: 'button[data-tab="10"][aria-label="Attach"]',
-  // File inputs
-  fileInputs: 'footer input[type="file"]'
+  // File inputs (global search)
+  fileInputs: 'input[type="file"]'
 };
 
 async function waitForElement(selector, timeout = 15000) {
@@ -153,35 +153,40 @@ async function handleAttachment(attachment, caption = "") {
   
   // Determine if it's an image
   const isImage = /\.(jpg|jpeg|png|gif|webp|heic|bmp)$/i.test(attachment.name);
-  console.log(`[WA Auto] Attachment type: ${isImage ? 'Image (Photos & Video)' : 'Document'}`);
+  const targetLabel = isImage ? 'Photos & videos' : 'Document';
+  console.log(`[WA Auto] Attachment type: ${isImage ? 'Image' : 'Document'}. Targeting menu: ${targetLabel}`);
 
   const attachBtn = await waitForElement(SELECTORS.attachBtn);
   if (!attachBtn) throw new Error("Attach button not found");
   
   console.log(`[WA Auto] Clicking attach button`);
   attachBtn.click();
-  await sleep(2000); // Wait for inputs to be added to DOM
+  await sleep(1500);
 
-  // Find all file inputs in the footer
-  const inputs = Array.from(document.querySelectorAll(SELECTORS.fileInputs));
-  console.log(`[WA Auto] Found ${inputs.length} file inputs`);
+  // Wait for the specific menu button to appear
+  console.log(`[WA Auto] Waiting for menu button: ${targetLabel}`);
+  const menuBtn = await waitForElement(`button[aria-label="${targetLabel}"]`);
+  if (!menuBtn) throw new Error(`Menu button "${targetLabel}" not found`);
 
-  let fileInput;
-  if (isImage) {
-    // Photos & Videos input usually has image/* in accept
-    fileInput = inputs.find(i => i.accept && i.accept.includes('image/'));
-  } else {
-    // Documents input usually has * in accept or doesn't include image
-    fileInput = inputs.find(i => i.accept === '*' || (i.accept && !i.accept.includes('image')) || !i.accept);
+  // Often the input is a hidden sibling or child of the menu button
+  // We'll look for the input associated with this specific button to avoid "Sticker" input
+  let fileInput = menuBtn.querySelector('input[type="file"]') || 
+                  menuBtn.parentElement.querySelector('input[type="file"]') ||
+                  menuBtn.closest('li')?.querySelector('input[type="file"]');
+
+  if (!fileInput) {
+    console.warn(`[WA Auto] Could not find input directly associated with "${targetLabel}", searching globally...`);
+    const inputs = Array.from(document.querySelectorAll(SELECTORS.fileInputs));
+    if (isImage) {
+      // Photos & Videos: usually has image/* and video/*
+      fileInput = inputs.find(i => i.accept && i.accept.includes('image/') && i.accept.includes('video/'));
+    } else {
+      // Document: usually has * or a long list of extensions
+      fileInput = inputs.find(i => i.accept === '*' || (i.accept && !i.accept.includes('image')));
+    }
   }
 
-  // Fallback to the first one if specific not found
-  if (!fileInput && inputs.length > 0) {
-    console.warn(`[WA Auto] Could not find specific input for ${isImage ? 'image' : 'document'}, using first available`);
-    fileInput = inputs[0];
-  }
-
-  if (!fileInput) throw new Error("No file input found in footer");
+  if (!fileInput) throw new Error("No suitable file input found");
 
   console.log(`[WA Auto] Preparing file from data URL`);
   const res = await fetch(attachment.dataUrl);
@@ -192,7 +197,7 @@ async function handleAttachment(attachment, caption = "") {
   dataTransfer.items.add(file);
   fileInput.files = dataTransfer.files;
   fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-  console.log(`[WA Auto] File attached to ${isImage ? 'Photos & Video' : 'Document'} input`);
+  console.log(`[WA Auto] File attached to ${targetLabel} input`);
 
   await sleep(5000); // Wait for upload preview to load and become interactive
 
@@ -215,7 +220,7 @@ async function handleAttachment(attachment, caption = "") {
 
   console.log(`[WA Auto] Looking for send button in attachment preview...`);
   // Precise selector based on user feedback and DOM observation
-  const sendBtnSelector = 'button.xdj266r.x14z9mp[aria-label="Send"], span[data-icon="wds-ic-send-filled"], span[data-icon="send"]';
+  const sendBtnSelector = 'button.xdj266r.x14z9mp[aria-label="Send"], span[data-icon="wds-ic-send-filled"], span[data-icon="send"], [role="button"][aria-label="Send"]';
   const sendBtn = await waitForElement(sendBtnSelector);
   
   if (sendBtn) {
