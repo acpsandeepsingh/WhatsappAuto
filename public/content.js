@@ -10,8 +10,8 @@ const SELECTORS = {
   chatList: '#pane-side [role="grid"]',
   // Individual chat row
   chatRow: '[role="row"]',
-  // Message input box
-  messageBox: 'footer div[contenteditable="true"][data-tab="10"]',
+  // Message input box - broadened to handle Lexical variations
+  messageBox: 'footer div[contenteditable="true"][data-tab="10"], div.lexical-rich-text-input div[contenteditable="true"]',
   // Send button (appears after typing or in attachment preview)
   sendBtn: 'span[data-icon="send"], span[data-icon="wds-ic-send-filled"], button[aria-label="Send"]',
   // Attach button (the plus icon)
@@ -78,28 +78,58 @@ async function searchAndOpenChat(phone) {
 }
 
 async function injectMessage(text) {
-  console.log(`[WA Auto] Step 2: Injecting message text`);
+  console.log(`[WA Auto] Step 2: Injecting message text: ${text.substring(0, 20)}...`);
   const messageBox = await waitForElement(SELECTORS.messageBox);
   if (!messageBox) throw new Error("Message input box not found");
 
+  // Click then focus to ensure the editor is active
+  messageBox.click();
+  await sleep(500);
   messageBox.focus();
-  document.execCommand('insertText', false, text);
-  messageBox.dispatchEvent(new Event('input', { bubbles: true }));
-  console.log(`[WA Auto] Message text injected`);
+  await sleep(500);
+
+  // Clear existing text
+  document.execCommand('selectAll', false, null);
+  document.execCommand('delete', false, null);
   
-  await sleep(1000);
+  // Inject text using insertText which is best for Lexical/React editors
+  console.log(`[WA Auto] Attempting to inject text via execCommand...`);
+  document.execCommand('insertText', false, text);
+  
+  // Dispatch input event to trigger React state update
+  messageBox.dispatchEvent(new Event('input', { bubbles: true }));
+  
+  // Verify injection
+  const currentText = messageBox.innerText || messageBox.textContent;
+  console.log(`[WA Auto] Verification - Box content length: ${currentText.length}`);
+  
+  if (currentText.length === 0) {
+    console.warn(`[WA Auto] execCommand failed to show text, trying fallback injection...`);
+    // Fallback: Set textContent directly and dispatch events
+    messageBox.textContent = text;
+    messageBox.dispatchEvent(new Event('input', { bubbles: true }));
+    messageBox.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  await sleep(1500);
 
   // Send via Enter keypress as requested
   console.log(`[WA Auto] Sending message via Enter keypress`);
-  const enterEvent = new KeyboardEvent('keydown', {
+  
+  const eventOptions = {
     key: 'Enter',
     code: 'Enter',
     keyCode: 13,
     which: 13,
     bubbles: true,
     cancelable: true
-  });
-  messageBox.dispatchEvent(enterEvent);
+  };
+
+  messageBox.dispatchEvent(new KeyboardEvent('keydown', eventOptions));
+  messageBox.dispatchEvent(new KeyboardEvent('keypress', eventOptions));
+  messageBox.dispatchEvent(new KeyboardEvent('keyup', eventOptions));
+  
+  console.log(`[WA Auto] Enter keypress events dispatched`);
   
   return true;
 }
