@@ -4,46 +4,69 @@ console.log("WhatsApp Automation: Content Script Loaded");
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const SELECTORS = {
-  searchBox: 'div[contenteditable="true"][data-tab="3"], input[title="Search or start new chat"]',
+  // Search box is an input with data-tab="3"
+  searchBox: 'input[data-tab="3"], #_r_b_',
+  // Chat list container
   chatList: '#pane-side [role="grid"]',
+  // Individual chat row
   chatRow: '[role="row"]',
-  messageBox: 'footer div[contenteditable="true"][data-tab="10"], footer div[role="textbox"]',
-  sendBtn: 'span[data-icon="send"]',
-  attachBtn: 'div[aria-label="Attach"], span[data-icon="plus-rounded"]',
-  fileInput: 'input[type="file"]'
+  // Message input box
+  messageBox: 'footer div[contenteditable="true"][data-tab="10"]',
+  // Send button (appears after typing)
+  sendBtn: 'span[data-icon="send"], button:has(span[data-icon="send"])',
+  // Attach button (the plus icon)
+  attachBtn: 'button[data-tab="10"][aria-label="Attach"]',
+  // File input is usually hidden in the footer
+  fileInput: 'footer input[type="file"]'
 };
 
 async function waitForElement(selector, timeout = 15000) {
+  console.log(`[WA Auto] Waiting for element: ${selector}`);
   const start = Date.now();
   while (Date.now() - start < timeout) {
     const el = document.querySelector(selector);
-    if (el && el.isConnected) return el;
+    if (el && el.isConnected) {
+      console.log(`[WA Auto] Found element: ${selector}`);
+      return el;
+    }
     await sleep(500);
   }
+  console.error(`[WA Auto] Timeout waiting for element: ${selector}`);
   return null;
 }
 
 async function searchAndOpenChat(phone) {
+  console.log(`[WA Auto] Step 1: Searching for contact ${phone}`);
   const searchBox = await waitForElement(SELECTORS.searchBox);
   if (!searchBox) throw new Error("Search box not found");
 
   searchBox.focus();
+  // Clear existing text using execCommand to ensure React state updates
   document.execCommand('selectAll', false, null);
   document.execCommand('delete', false, null);
+  
+  // Type the phone number
   document.execCommand('insertText', false, phone);
   searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+  console.log(`[WA Auto] Typed phone number into search box`);
 
-  await sleep(2500); // Wait for results to filter
+  await sleep(3000); // Wait for results to filter
 
   const results = document.querySelectorAll(SELECTORS.chatRow);
+  console.log(`[WA Auto] Found ${results.length} potential chat results`);
+  
   if (results.length > 0) {
-    // Click the first result that isn't a header or "No chats found"
+    // Click the first result that matches or is a valid chat
+    // In the provided HTML, the first row is often a header "Chats"
     for (const row of results) {
-      if (row.textContent.includes(phone) || row.querySelector('[title]')) {
-        row.click();
-        await sleep(1500);
-        return true;
-      }
+      const text = row.textContent || "";
+      // Skip the "Chats" header row
+      if (text.trim() === "Chats") continue;
+      
+      console.log(`[WA Auto] Clicking chat row: ${text.substring(0, 20)}...`);
+      row.click();
+      await sleep(2000);
+      return true;
     }
   }
 
@@ -51,27 +74,36 @@ async function searchAndOpenChat(phone) {
 }
 
 async function injectMessage(text) {
+  console.log(`[WA Auto] Step 2: Injecting message text`);
   const messageBox = await waitForElement(SELECTORS.messageBox);
   if (!messageBox) throw new Error("Message input box not found");
 
   messageBox.focus();
   document.execCommand('insertText', false, text);
   messageBox.dispatchEvent(new Event('input', { bubbles: true }));
-  await sleep(800);
+  console.log(`[WA Auto] Message text injected`);
+  await sleep(1000);
   return true;
 }
 
 async function handleAttachment(attachment) {
-  if (!attachment || !attachment.dataUrl) return true;
+  if (!attachment || !attachment.dataUrl) {
+    console.log(`[WA Auto] No attachment for this contact`);
+    return true;
+  }
 
+  console.log(`[WA Auto] Step 3: Handling attachment: ${attachment.name}`);
   const attachBtn = await waitForElement(SELECTORS.attachBtn);
   if (!attachBtn) throw new Error("Attach button not found");
+  
+  console.log(`[WA Auto] Clicking attach button`);
   attachBtn.click();
-  await sleep(1000);
+  await sleep(1500);
 
   const fileInput = document.querySelector(SELECTORS.fileInput);
-  if (!fileInput) throw new Error("File input not found after clicking attach");
+  if (!fileInput) throw new Error("File input not found in footer");
 
+  console.log(`[WA Auto] Preparing file from data URL`);
   const res = await fetch(attachment.dataUrl);
   const blob = await res.blob();
   const file = new File([blob], attachment.name || "attachment", { type: blob.type });
@@ -80,23 +112,27 @@ async function handleAttachment(attachment) {
   dataTransfer.items.add(file);
   fileInput.files = dataTransfer.files;
   fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+  console.log(`[WA Auto] File attached to input`);
 
-  await sleep(3000); // Wait for upload preview
+  await sleep(4000); // Wait for upload preview to load
 
   const sendBtn = await waitForElement(SELECTORS.sendBtn);
   if (sendBtn) {
+    console.log(`[WA Auto] Clicking send button in attachment preview`);
     sendBtn.click();
-    await sleep(1000);
+    await sleep(1500);
     return true;
   }
   throw new Error("Send button not found in attachment preview");
 }
 
 async function clickSend() {
+  console.log(`[WA Auto] Step 4: Clicking send button`);
   const sendBtn = await waitForElement(SELECTORS.sendBtn);
   if (sendBtn) {
     sendBtn.click();
-    await sleep(1000);
+    console.log(`[WA Auto] Send button clicked`);
+    await sleep(1500);
     return true;
   }
   throw new Error("Send button not found");
@@ -104,6 +140,7 @@ async function clickSend() {
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "process_row") {
+    console.log(`[WA Auto] Received process_row command for: ${request.data.phone}`);
     (async () => {
       try {
         const { phone, message, attachment } = request.data;
@@ -117,9 +154,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           await clickSend();
         }
 
+        console.log(`[WA Auto] Successfully processed contact: ${phone}`);
         sendResponse({ success: true });
       } catch (e) {
-        console.error("Automation Error:", e);
+        console.error("[WA Auto] Automation Error:", e);
         sendResponse({ success: false, error: e.message });
       }
     })();

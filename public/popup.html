@@ -172,8 +172,14 @@
     const startBtn = document.getElementById('start-btn');
     const stopBtn = document.getElementById('stop-btn');
 
+    console.log("[Popup] Script loaded");
+
     function updateUI() {
       chrome.runtime.sendMessage({ action: "get_status" }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.warn("[Popup] Error getting status:", chrome.runtime.lastError.message);
+          return;
+        }
         if (!response) return;
 
         const { status, currentIndex, total } = response;
@@ -207,19 +213,26 @@
     }
 
     startBtn.addEventListener('click', () => {
+      console.log("[Popup] Start button clicked");
       chrome.runtime.sendMessage({ action: "get_status" }, (statusRes) => {
-        if (statusRes.status === 'paused') {
+        if (statusRes && statusRes.status === 'paused') {
+          console.log("[Popup] Resuming queue");
           chrome.runtime.sendMessage({ action: "resume_queue" });
         } else {
-          // If idle, we need the contacts from storage
+          console.log("[Popup] Fetching contacts from storage to start new queue");
           chrome.storage.local.get(['contacts', 'settings'], (data) => {
             if (data.contacts && data.contacts.length > 0) {
+              console.log(`[Popup] Sending start_queue with ${data.contacts.length} contacts`);
               chrome.runtime.sendMessage({ 
                 action: "start_queue", 
                 contacts: data.contacts, 
                 settings: data.settings 
+              }, (res) => {
+                console.log("[Popup] Start queue response:", res);
+                updateUI();
               });
             } else {
+              console.error("[Popup] No contacts found in storage");
               alert("Please add contacts in the dashboard first!");
               chrome.runtime.openOptionsPage();
             }
@@ -229,15 +242,21 @@
     });
 
     stopBtn.addEventListener('click', () => {
-      chrome.runtime.sendMessage({ action: "stop_queue" });
+      console.log("[Popup] Stop button clicked");
+      chrome.runtime.sendMessage({ action: "stop_queue" }, (res) => {
+        console.log("[Popup] Stop queue response:", res);
+        updateUI();
+      });
     });
 
     document.getElementById('open-dashboard').addEventListener('click', () => {
+      console.log("[Popup] Opening dashboard");
       chrome.runtime.openOptionsPage();
     });
 
     document.getElementById('wa-link').addEventListener('click', (e) => {
       e.preventDefault();
+      console.log("[Popup] Opening WhatsApp Web");
       window.open('https://web.whatsapp.com', '_blank');
     });
 
