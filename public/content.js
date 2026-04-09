@@ -16,8 +16,8 @@ const SELECTORS = {
   sendBtn: 'span[data-icon="send"], span[data-icon="wds-ic-send-filled"], button[aria-label="Send"]',
   // Attach button (the plus icon)
   attachBtn: 'button[data-tab="10"][aria-label="Attach"]',
-  // File input is usually hidden in the footer
-  fileInput: 'footer input[type="file"]'
+  // File inputs
+  fileInputs: 'footer input[type="file"]'
 };
 
 async function waitForElement(selector, timeout = 15000) {
@@ -148,15 +148,38 @@ async function handleAttachment(attachment) {
   }
 
   console.log(`[WA Auto] Step 3: Handling attachment: ${attachment.name}`);
+  
+  // Determine if it's an image
+  const isImage = /\.(jpg|jpeg|png|gif|webp|heic|bmp)$/i.test(attachment.name);
+  console.log(`[WA Auto] Attachment type: ${isImage ? 'Image (Photos & Video)' : 'Document'}`);
+
   const attachBtn = await waitForElement(SELECTORS.attachBtn);
   if (!attachBtn) throw new Error("Attach button not found");
   
   console.log(`[WA Auto] Clicking attach button`);
   attachBtn.click();
-  await sleep(1500);
+  await sleep(1000);
 
-  const fileInput = document.querySelector(SELECTORS.fileInput);
-  if (!fileInput) throw new Error("File input not found in footer");
+  // Find all file inputs in the footer
+  const inputs = Array.from(document.querySelectorAll(SELECTORS.fileInputs));
+  console.log(`[WA Auto] Found ${inputs.length} file inputs`);
+
+  let fileInput;
+  if (isImage) {
+    // Photos & Videos input usually has image/* in accept
+    fileInput = inputs.find(i => i.accept && i.accept.includes('image'));
+  } else {
+    // Documents input usually has * in accept or doesn't include image
+    fileInput = inputs.find(i => i.accept === '*' || (i.accept && !i.accept.includes('image')) || !i.accept);
+  }
+
+  // Fallback to the first one if specific not found
+  if (!fileInput && inputs.length > 0) {
+    console.warn(`[WA Auto] Could not find specific input for ${isImage ? 'image' : 'document'}, using first available`);
+    fileInput = inputs[0];
+  }
+
+  if (!fileInput) throw new Error("No file input found in footer");
 
   console.log(`[WA Auto] Preparing file from data URL`);
   const res = await fetch(attachment.dataUrl);
@@ -167,13 +190,13 @@ async function handleAttachment(attachment) {
   dataTransfer.items.add(file);
   fileInput.files = dataTransfer.files;
   fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-  console.log(`[WA Auto] File attached to input`);
+  console.log(`[WA Auto] File attached to ${isImage ? 'Photos & Video' : 'Document'} input`);
 
   await sleep(5000); // Wait for upload preview to load and become interactive
 
   console.log(`[WA Auto] Looking for send button in attachment preview...`);
   // Precise selector based on user feedback and DOM observation
-  const sendBtnSelector = 'button.xdj266r.x14z9mp[aria-label="Send"], span[data-icon="wds-ic-send-filled"]';
+  const sendBtnSelector = 'button.xdj266r.x14z9mp[aria-label="Send"], span[data-icon="wds-ic-send-filled"], span[data-icon="send"]';
   const sendBtn = await waitForElement(sendBtnSelector);
   
   if (sendBtn) {
