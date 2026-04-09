@@ -52,20 +52,29 @@ async function searchAndOpenChat(phone) {
 
   await sleep(3000); // Wait for results to filter
 
+  // Try the user suggested selector first: div[role="gridcell"][aria-colindex="2"]._ak8o
+  console.log(`[WA Auto] Looking for search result cell (_ak8o)...`);
+  const resultCell = document.querySelector('div[aria-label="Search results."] div._ak8o');
+  
+  if (resultCell) {
+    console.log(`[WA Auto] Found result cell, clicking...`);
+    resultCell.click();
+    await sleep(3000); // Wait for chat to open
+    return true;
+  }
+
+  // Fallback to row logic if specific cell not found
   const results = document.querySelectorAll(SELECTORS.chatRow);
-  console.log(`[WA Auto] Found ${results.length} potential chat results`);
+  console.log(`[WA Auto] Fallback: Found ${results.length} potential chat results`);
   
   if (results.length > 0) {
-    // Click the first result that matches or is a valid chat
-    // In the provided HTML, the first row is often a header "Chats"
     for (const row of results) {
       const text = row.textContent || "";
-      // Skip the "Chats" header row
       if (text.trim() === "Chats") continue;
       
       console.log(`[WA Auto] Clicking chat row: ${text.substring(0, 20)}...`);
       row.click();
-      await sleep(2000);
+      await sleep(3000);
       return true;
     }
   }
