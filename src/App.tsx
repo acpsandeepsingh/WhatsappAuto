@@ -75,18 +75,20 @@ interface AppSettings {
   defaultTemplate: string;
 }
 
+const DEFAULT_SETTINGS: AppSettings = {
+  minDelay: 3000,
+  maxDelay: 10000,
+  randomDelay: true,
+  maxRetries: 3,
+  defaultTemplate: "Hello {{name}}, this is a message for you."
+};
+
 export default function App() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [queueStatus, setQueueStatus] = useState<'idle' | 'running' | 'paused' | 'stopped'>('idle');
   const [currentIndex, setCurrentIndex] = useState(-1);
-  const [settings, setSettings] = useState<AppSettings>({
-    minDelay: 3000,
-    maxDelay: 10000,
-    randomDelay: true,
-    maxRetries: 3,
-    defaultTemplate: "Hello {{name}}, this is a message for you."
-  });
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -259,6 +261,44 @@ export default function App() {
     }
   };
 
+  const downloadCSV = () => {
+    if (contacts.length === 0) {
+      toast.error("No data to download");
+      return;
+    }
+    const data = contacts.map(c => ({
+      'Sr. No': c.sr_no,
+      'Name': c.name,
+      'Phone': c.phone,
+      'Message Template': c.message_template,
+      'Status': c.status,
+      'Error': c.error || ''
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const csv = XLSX.utils.sheet_to_csv(ws);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `whatsapp_automation_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const resetSettings = () => {
+    setSettings(DEFAULT_SETTINGS);
+    toast.success("Settings reset to defaults");
+  };
+
+  const clearContacts = () => {
+    if (window.confirm("Are you sure you want to clear all contacts?")) {
+      setContacts([]);
+      toast.success("Contacts cleared");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -285,6 +325,11 @@ export default function App() {
               Import CSV/XLS
             </Button>
             
+            <Button variant="outline" onClick={downloadCSV} className="gap-2">
+              <Download className="w-4 h-4" />
+              Download CSV
+            </Button>
+
             <div className="h-8 w-px bg-slate-200 mx-2" />
             
             {queueStatus === 'idle' || queueStatus === 'stopped' ? (
@@ -485,11 +530,21 @@ export default function App() {
         {/* Settings & Help */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Card className="border-none shadow-sm md:col-span-2">
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
               <CardTitle className="text-lg flex items-center gap-2">
                 <SettingsIcon className="w-5 h-5" />
                 Automation Settings
               </CardTitle>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={resetSettings} className="h-8 text-xs gap-1">
+                  <RefreshCw className="w-3 h-3" />
+                  Reset Defaults
+                </Button>
+                <Button variant="ghost" size="sm" onClick={clearContacts} className="h-8 text-xs gap-1 text-red-500 hover:text-red-600 hover:bg-red-50">
+                  <Trash2 className="w-3 h-3" />
+                  Clear All
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-4">
