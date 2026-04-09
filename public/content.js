@@ -19,7 +19,10 @@ const SELECTORS = {
   // Attach button (the plus icon)
   attachBtn: 'button[data-tab="10"][aria-label="Attach"]',
   // File inputs (global search)
-  fileInputs: 'input[type="file"]'
+  fileInputs: 'input[type="file"]',
+  // New Chat
+  newChatBtn: 'button[aria-label="New chat"], span[data-icon="new-chat-outline"]',
+  newChatSearch: 'div[role="textbox"][aria-label="Search name or number"], input[aria-label="Search name or number"]'
 };
 
 async function waitForElement(selector, timeout = 15000) {
@@ -74,6 +77,37 @@ async function searchAndOpenChat(phone) {
     fallbackCell.click();
     await sleep(4000);
     return true;
+  }
+
+  // NEW FALLBACK: Try "New Chat" button for numbers not in chat history
+  console.log(`[WA Auto] Contact not found in main search, trying "New Chat" fallback...`);
+  const newChatBtn = await waitForElement(SELECTORS.newChatBtn);
+  if (newChatBtn) {
+    console.log(`[WA Auto] Clicking New Chat button`);
+    newChatBtn.click();
+    await sleep(2000);
+    
+    const newChatSearch = await waitForElement(SELECTORS.newChatSearch);
+    if (newChatSearch) {
+      console.log(`[WA Auto] Typing phone into New Chat search`);
+      newChatSearch.focus();
+      // Clear if needed
+      document.execCommand('selectAll', false, null);
+      document.execCommand('delete', false, null);
+      
+      document.execCommand('insertText', false, phone);
+      newChatSearch.dispatchEvent(new Event('input', { bubbles: true }));
+      await sleep(3000);
+      
+      // Look for the result in the new chat list
+      const newChatResult = document.querySelector('div[aria-label="Search results"] div._ak8o, div[role="listitem"] div._ak8o, div._ak8o');
+      if (newChatResult) {
+        console.log(`[WA Auto] Found result in New Chat, clicking...`);
+        newChatResult.click();
+        await sleep(4000);
+        return true;
+      }
+    }
   }
 
   throw new Error(`Contact ${phone} not found or chat failed to open`);
