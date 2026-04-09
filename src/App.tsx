@@ -112,16 +112,30 @@ export default function App() {
     const listener = (message: any) => {
       if (message.action === "status_update") {
         setQueueStatus(message.status);
-        setCurrentIndex(message.currentIndex);
-        if (message.error) toast.error(message.error);
         
-        // Update local status if sent successfully
-        if (message.currentIndex !== undefined) {
-          setContacts(prev => prev.map((c, i) => {
-            if (i < message.currentIndex) return { ...c, status: 'sent' };
-            if (i === message.currentIndex && message.status === 'running') return { ...c, status: 'pending' };
-            return c;
-          }));
+        if (message.error) toast.error(message.error);
+        if (message.lastError && message.lastStatus === 'failed') {
+          toast.error(`Failed: ${message.lastError}`);
+        }
+        
+        // Update local status based on the specific contact that finished
+        if (message.contactId) {
+          setContacts(prev => {
+            const newContacts = prev.map(c => {
+              if (c.id === message.contactId) {
+                return { ...c, status: message.lastStatus, error: message.lastError };
+              }
+              return c;
+            });
+            
+            // Also update the current highlighting index based on the contactId
+            const idx = newContacts.findIndex(c => c.id === message.contactId);
+            if (idx !== -1) setCurrentIndex(idx);
+            
+            return newContacts;
+          });
+        } else if (message.currentIndex !== undefined && message.currentIndex === -1) {
+          setCurrentIndex(-1);
         }
       }
     };
@@ -212,12 +226,14 @@ export default function App() {
   };
 
   const startQueue = () => {
-    if (contacts.length === 0) {
-      toast.error("Add some contacts first");
+    const pendingContacts = contacts.filter(c => c.status !== 'sent');
+    
+    if (pendingContacts.length === 0) {
+      toast.error("No pending contacts to send");
       return;
     }
 
-    const preparedContacts = contacts.map(c => ({
+    const preparedContacts = pendingContacts.map(c => ({
       ...c,
       message: parseTemplate(c.message_template, c)
     }));
@@ -406,6 +422,13 @@ export default function App() {
                   <Plus className="w-4 h-4" />
                   Add Row
                 </Button>
+                <Button variant="ghost" size="sm" onClick={() => {
+                  setContacts(contacts.map(c => ({ ...c, status: 'pending', error: undefined })));
+                  toast.success("All statuses cleared");
+                }} className="text-slate-500 hover:text-slate-700 gap-1">
+                  <RefreshCw className="w-3 h-3" />
+                  Clear Status
+                </Button>
               </div>
               <div className="relative w-full md:w-80">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -500,13 +523,20 @@ export default function App() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <span className={`text-xs font-bold px-2 py-1 rounded-full uppercase tracking-wider ${
-                            contact.status === 'sent' ? 'bg-green-100 text-green-700' :
-                            contact.status === 'failed' ? 'bg-red-100 text-red-700' :
-                            'bg-slate-100 text-slate-600'
-                          }`}>
-                            {contact.status}
-                          </span>
+                          <div className="flex flex-col">
+                            <span className={`text-xs font-bold px-2 py-1 rounded-full uppercase tracking-wider w-fit ${
+                              contact.status === 'sent' ? 'bg-green-100 text-green-700' :
+                              contact.status === 'failed' ? 'bg-red-100 text-red-700' :
+                              'bg-slate-100 text-slate-600'
+                            }`}>
+                              {contact.status}
+                            </span>
+                            {contact.error && (
+                              <span className="text-[10px] text-red-500 mt-1 truncate max-w-[100px]" title={contact.error}>
+                                {contact.error}
+                              </span>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>
                           <Button 
@@ -539,6 +569,13 @@ export default function App() {
                 <Button variant="ghost" size="sm" onClick={resetSettings} className="h-8 text-xs gap-1">
                   <RefreshCw className="w-3 h-3" />
                   Reset Defaults
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => {
+                  setContacts(contacts.map(c => ({ ...c, status: 'pending', error: undefined })));
+                  toast.success("Statuses cleared");
+                }} className="h-8 text-xs gap-1">
+                  <RefreshCw className="w-3 h-3" />
+                  Clear Status
                 </Button>
                 <Button variant="ghost" size="sm" onClick={clearContacts} className="h-8 text-xs gap-1 text-red-500 hover:text-red-600 hover:bg-red-50">
                   <Trash2 className="w-3 h-3" />

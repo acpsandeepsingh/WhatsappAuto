@@ -93,8 +93,13 @@ async function processNext() {
 
     if (result && result.success) {
       console.log(`[BG] Successfully processed row ${currentIndex}`);
+      queue[currentIndex].status = 'sent';
+      updateUI({ 
+        lastIndex: currentIndex, 
+        lastStatus: 'sent',
+        contactId: queue[currentIndex].id
+      });
       currentIndex++;
-      updateUI();
       
       const delay = settings.randomDelay 
         ? Math.floor(Math.random() * (settings.maxDelay - settings.minDelay + 1)) + settings.minDelay
@@ -103,10 +108,19 @@ async function processNext() {
       console.log(`[BG] Waiting ${delay}ms before next contact`);
       setTimeout(processNext, delay);
     } else {
-      console.error(`[BG] Row failed: ${result?.error}`);
-      // Move to next anyway or retry? For now, move to next.
+      const errorMsg = result?.error || "Unknown error";
+      console.error(`[BG] Row failed: ${errorMsg}`);
+      queue[currentIndex].status = 'failed';
+      queue[currentIndex].error = errorMsg;
+      
+      updateUI({ 
+        lastIndex: currentIndex, 
+        lastStatus: 'failed', 
+        lastError: errorMsg,
+        contactId: queue[currentIndex].id
+      });
+      
       currentIndex++; 
-      updateUI({ lastError: result?.error });
       setTimeout(processNext, 2000);
     }
   } catch (e) {
