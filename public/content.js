@@ -12,8 +12,8 @@ const SELECTORS = {
   chatRow: '[role="row"]',
   // Message input box
   messageBox: 'footer div[contenteditable="true"][data-tab="10"]',
-  // Send button (appears after typing)
-  sendBtn: 'span[data-icon="send"], button:has(span[data-icon="send"])',
+  // Send button (appears after typing or in attachment preview)
+  sendBtn: 'span[data-icon="send"], span[data-icon="wds-ic-send-filled"], button[aria-label="Send"]',
   // Attach button (the plus icon)
   attachBtn: 'button[data-tab="10"][aria-label="Attach"]',
   // File input is usually hidden in the footer
@@ -132,13 +132,18 @@ async function handleAttachment(attachment) {
   fileInput.dispatchEvent(new Event('change', { bubbles: true }));
   console.log(`[WA Auto] File attached to input`);
 
-  await sleep(4000); // Wait for upload preview to load
+  await sleep(5000); // Wait for upload preview to load and become interactive
 
-  const sendBtn = await waitForElement(SELECTORS.sendBtn);
+  console.log(`[WA Auto] Looking for send button in attachment preview...`);
+  // Precise selector based on user feedback and DOM observation
+  const sendBtnSelector = 'button.xdj266r.x14z9mp[aria-label="Send"], span[data-icon="wds-ic-send-filled"]';
+  const sendBtn = await waitForElement(sendBtnSelector);
+  
   if (sendBtn) {
-    console.log(`[WA Auto] Clicking send button in attachment preview`);
-    sendBtn.click();
-    await sleep(1500);
+    console.log(`[WA Auto] Found send button, clicking...`);
+    const actualBtn = sendBtn.closest('button') || sendBtn;
+    actualBtn.click();
+    await sleep(2000);
     return true;
   }
   throw new Error("Send button not found in attachment preview");
