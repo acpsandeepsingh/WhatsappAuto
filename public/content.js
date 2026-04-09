@@ -149,58 +149,107 @@ async function handleAttachment(attachment, caption = "") {
     return true;
   }
 
-  console.log(`[WA Auto] Step 3: Handling attachment: ${attachment.name}`);
+  console.log(`[WA Auto] Step 3: Handling attachment (Paste Method): ${attachment.name}`);
   
-  // Determine if it's an image
-  const isImage = /\.(jpg|jpeg|png|gif|webp|heic|bmp)$/i.test(attachment.name);
-  const targetLabel = isImage ? 'Photos & videos' : 'Document';
-  console.log(`[WA Auto] Attachment type: ${isImage ? 'Image' : 'Document'}. Targeting menu: ${targetLabel}`);
+  const messageBox = await waitForElement(SELECTORS.messageBox);
+  if (!messageBox) throw new Error("Message box not found for pasting");
 
-  const attachBtn = await waitForElement(SELECTORS.attachBtn);
-  if (!attachBtn) throw new Error("Attach button not found");
+  console.log(`[WA Auto] Preparing file from data URL`);
+  const res = await fetch(attachment.dataUrl);
+  const blob = await res.blob();
+  const file = new File([blob], attachment.name || "attachment", { type: blob.type });
+
+  // Focus and click message box to ensure it's ready
+  messageBox.click();
+  await sleep(500);
+  messageBox.focus();
+  await sleep(500);
+
+  console.log(`[WA Auto] Simulating paste event...`);
+  const dataTransfer = new DataTransfer();
+  dataTransfer.items.add(file);
   
-  console.log(`[WA Auto] Clicking attach button`);
-  attachBtn.click();
-  await sleep(2000); // Wait for menu and inputs to be fully ready
-
-  // Wait for the specific menu button to appear
-  console.log(`[WA Auto] Waiting for menu button: ${targetLabel}`);
-  const menuBtn = await waitForElement(`button[aria-label="${targetLabel}"]`);
-  if (!menuBtn) throw new Error(`Menu button "${targetLabel}" not found`);
-
-  // Log all file inputs for debugging
-  const allInputs = Array.from(document.querySelectorAll('input[type="file"]'));
-  console.log(`[WA Auto] Found ${allInputs.length} total file inputs on page:`);
-  allInputs.forEach((input, idx) => {
-    console.log(`[WA Auto] Input ${idx}: accept="${input.accept}" id="${input.id}" class="${input.className}"`);
+  const pasteEvent = new ClipboardEvent('paste', {
+    clipboardData: dataTransfer,
+    bubbles: true,
+    cancelable: true
   });
+  
+  messageBox.dispatchEvent(pasteEvent);
+  console.log(`[WA Auto] Paste event dispatched`);
 
-  // Strategy: Find the best matching input
-  let fileInput;
-  if (isImage) {
-    // Photos & Videos: usually has image and video in accept
-    fileInput = allInputs.find(i => i.accept && (i.accept.includes('image') || i.accept.includes('video')));
-  } else {
-    // Document: usually has * or doesn't mention image
-    fileInput = allInputs.find(i => i.accept === '*' || (i.accept && !i.accept.includes('image')));
+  // Wait to see if preview appears
+  console.log(`[WA Auto] Waiting for attachment preview to load...`);
+  await sleep(4000);
+
+  // Check if we are in the attachment preview by looking for the caption box or send button
+  const captionBox = document.querySelector(SELECTORS.captionBox);
+  const sendBtnPreview = document.querySelector('button.xdj266r.x14z9mp[aria-label="Send"], span[data-icon="wds-ic-send-filled"], [role="button"][aria-label="Send"]');
+
+  if (!captionBox && !sendBtnPreview) {
+    console.warn(`[WA Auto] Paste method didn't seem to trigger preview, falling back to file input method...`);
+    return await handleAttachmentFallback(attachment, caption);
   }
 
-  // Fallback: If we found inputs but none matched our criteria, use the most likely one
-  if (!fileInput && allInputs.length > 0) {
-    console.warn(`[WA Auto] No exact match for ${targetLabel}, using fallback selection logic`);
-    if (isImage) {
-      // Often the first or second input
-      fileInput = allInputs[0];
+  // Inject caption if provided
+  if (caption) {
+    console.log(`[WA Auto] Injecting caption into preview...`);
+    const activeCaptionBox = await waitForElement(SELECTORS.captionBox);
+    if (activeCaptionBox) {
+      activeCaptionBox.click();
+      await sleep(500);
+      activeCaptionBox.focus();
+      document.execCommand('insertText', false, caption);
+      activeCaptionBox.dispatchEvent(new Event('input', { bubbles: true }));
+      console.log(`[WA Auto] Caption injected`);
+      await sleep(1500);
     } else {
-      // Often the one with accept="*"
-      fileInput = allInputs.find(i => i.accept === '*') || allInputs[allInputs.length - 1];
+      console.warn(`[WA Auto] Caption box not found in preview`);
     }
   }
 
-  if (!fileInput) throw new Error("No file input found on page. Please ensure WhatsApp is fully loaded.");
+  console.log(`[WA Auto] Clicking send in preview...`);
+  const sendBtn = sendBtnPreview || await waitForElement('button.xdj266r.x14z9mp[aria-label="Send"], span[data-icon="wds-ic-send-filled"], [role="button"][aria-label="Send"]');
+  
+  if (sendBtn) {
+    const actualBtn = sendBtn.closest('button') || sendBtn;
+    actualBtn.click();
+    await sleep(2000);
+    return true;
+  }
+  
+  throw new Error("Could not find send button in preview after paste");
+}
 
-  console.log(`[WA Auto] Using file input with accept="${fileInput.accept}"`);
-  console.log(`[WA Auto] Preparing file from data URL`);
+async function handleAttachmentFallback(attachment, caption = "") {
+  console.log(`[WA Auto] FALLBACK: Using file input method for: ${attachment.name}`);
+  
+  const isImage = /\.(jpg|jpeg|png|gif|webp|heic|bmp)$/i.test(attachment.name);
+  const targetLabel = isImage ? 'Photos & videos' : 'Document';
+
+  const attachBtn = await waitForElement(SELECTORS.attachBtn);
+  if (!attachBtn) throw new Error("Attach button not found in fallback");
+  
+  attachBtn.click();
+  await sleep(2000);
+
+  const menuBtn = await waitForElement(`button[aria-label="${targetLabel}"]`);
+  if (!menuBtn) throw new Error(`Menu button "${targetLabel}" not found in fallback`);
+
+  const allInputs = Array.from(document.querySelectorAll('input[type="file"]'));
+  let fileInput;
+  if (isImage) {
+    fileInput = allInputs.find(i => i.accept && (i.accept.includes('image') || i.accept.includes('video')));
+  } else {
+    fileInput = allInputs.find(i => i.accept === '*' || (i.accept && !i.accept.includes('image')));
+  }
+
+  if (!fileInput && allInputs.length > 0) {
+    fileInput = isImage ? allInputs[0] : (allInputs.find(i => i.accept === '*') || allInputs[allInputs.length - 1]);
+  }
+
+  if (!fileInput) throw new Error("No file input found in fallback");
+
   const res = await fetch(attachment.dataUrl);
   const blob = await res.blob();
   const file = new File([blob], attachment.name || "attachment", { type: blob.type });
@@ -209,39 +258,26 @@ async function handleAttachment(attachment, caption = "") {
   dataTransfer.items.add(file);
   fileInput.files = dataTransfer.files;
   fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-  console.log(`[WA Auto] File attached to input`);
 
-  await sleep(5000); // Wait for upload preview to load and become interactive
+  await sleep(5000);
 
-  // Inject caption if provided
   if (caption) {
-    console.log(`[WA Auto] Injecting caption into preview...`);
-    const captionBox = await waitForElement(SELECTORS.captionBox);
-    if (captionBox) {
-      captionBox.click();
-      await sleep(500);
-      captionBox.focus();
+    const cb = await waitForElement(SELECTORS.captionBox);
+    if (cb) {
+      cb.focus();
       document.execCommand('insertText', false, caption);
-      captionBox.dispatchEvent(new Event('input', { bubbles: true }));
-      console.log(`[WA Auto] Caption injected`);
-      await sleep(1500);
-    } else {
-      console.warn(`[WA Auto] Caption box not found in preview`);
+      cb.dispatchEvent(new Event('input', { bubbles: true }));
+      await sleep(1000);
     }
   }
 
-  console.log(`[WA Auto] Looking for send button in attachment preview...`);
-  const sendBtnSelector = 'button.xdj266r.x14z9mp[aria-label="Send"], span[data-icon="wds-ic-send-filled"], span[data-icon="send"], [role="button"][aria-label="Send"]';
-  const sendBtn = await waitForElement(sendBtnSelector);
-  
+  const sendBtn = await waitForElement('button.xdj266r.x14z9mp[aria-label="Send"], span[data-icon="wds-ic-send-filled"], [role="button"][aria-label="Send"]');
   if (sendBtn) {
-    console.log(`[WA Auto] Found send button, clicking...`);
-    const actualBtn = sendBtn.closest('button') || sendBtn;
-    actualBtn.click();
+    (sendBtn.closest('button') || sendBtn).click();
     await sleep(2000);
     return true;
   }
-  throw new Error("Send button not found in attachment preview");
+  throw new Error("Send button not found in fallback preview");
 }
 
 async function clickSend() {
