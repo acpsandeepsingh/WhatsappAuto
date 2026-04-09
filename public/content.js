@@ -13,7 +13,7 @@ const SELECTORS = {
   // Message input box - broadened to handle Lexical variations
   messageBox: 'footer div[contenteditable="true"][data-tab="10"], div.lexical-rich-text-input div[contenteditable="true"]',
   // Caption box in attachment preview
-  captionBox: 'div[contenteditable="true"][data-placeholder="Add a caption"], div[contenteditable="true"].lexical-rich-text-input, div[aria-label="Add a caption"], div[data-tab="10"][contenteditable="true"]',
+  captionBox: 'div.x1hx0egp.x6ikm8r.x1odjw0f[role="textbox"], [label="Type a message"], div[contenteditable="true"][data-placeholder="Add a caption"], div[contenteditable="true"].lexical-rich-text-input, div[aria-label="Add a caption"], div[data-tab="10"][contenteditable="true"]',
   // Send button (appears after typing or in attachment preview)
   sendBtn: 'span[data-icon="send"], span[data-icon="wds-ic-send-filled"], button[aria-label="Send"], div[role="button"] span[data-icon="send"]',
   // Attach button (the plus icon)
@@ -196,9 +196,16 @@ async function handleAttachment(attachment, caption = "") {
     console.log(`[WA Auto] Injecting caption into preview...`);
     const activeCaptionBox = await waitForElement(SELECTORS.captionBox);
     if (activeCaptionBox) {
+      console.log(`[WA Auto] Found caption box, clicking and focusing...`);
       activeCaptionBox.click();
-      await sleep(500);
+      await sleep(800);
       activeCaptionBox.focus();
+      await sleep(500);
+      
+      // Clear any existing text just in case
+      document.execCommand('selectAll', false, null);
+      document.execCommand('delete', false, null);
+      
       document.execCommand('insertText', false, caption);
       activeCaptionBox.dispatchEvent(new Event('input', { bubbles: true }));
       console.log(`[WA Auto] Caption injected`);
