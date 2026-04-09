@@ -168,8 +168,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         if (attachment) {
           await handleAttachment(attachment);
-        } else {
-          await clickSend();
         }
 
         console.log(`[WA Auto] Successfully processed contact: ${phone}`);
