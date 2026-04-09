@@ -52,34 +52,29 @@ async function searchAndOpenChat(phone) {
 
   await sleep(3000); // Wait for results to filter
 
-  // Try the user suggested selector first: div[role="gridcell"][aria-colindex="2"]._ak8o
-  console.log(`[WA Auto] Looking for search result cell (_ak8o)...`);
-  const resultCell = document.querySelector('div[aria-label="Search results."] div._ak8o');
+  // Target the specific cell suggested by the user: div[role="gridcell"][aria-colindex="2"]._ak8o
+  console.log(`[WA Auto] Looking for specific result cell (_ak8o)...`);
+  const resultCell = document.querySelector('div[aria-label="Search results."] div[role="gridcell"][aria-colindex="2"]._ak8o');
   
   if (resultCell) {
-    console.log(`[WA Auto] Found result cell, clicking...`);
+    console.log(`[WA Auto] Found specific result cell, clicking...`);
+    // Dispatching mousedown and click to be more thorough
+    resultCell.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     resultCell.click();
-    await sleep(3000); // Wait for chat to open
+    await sleep(4000); // Wait longer for chat to open
     return true;
   }
 
-  // Fallback to row logic if specific cell not found
-  const results = document.querySelectorAll(SELECTORS.chatRow);
-  console.log(`[WA Auto] Fallback: Found ${results.length} potential chat results`);
-  
-  if (results.length > 0) {
-    for (const row of results) {
-      const text = row.textContent || "";
-      if (text.trim() === "Chats") continue;
-      
-      console.log(`[WA Auto] Clicking chat row: ${text.substring(0, 20)}...`);
-      row.click();
-      await sleep(3000);
-      return true;
-    }
+  // Fallback: search for any _ak8o in the search results
+  const fallbackCell = document.querySelector('div[aria-label="Search results."] div._ak8o');
+  if (fallbackCell) {
+    console.log(`[WA Auto] Found fallback result cell, clicking...`);
+    fallbackCell.click();
+    await sleep(4000);
+    return true;
   }
 
-  throw new Error(`Contact ${phone} not found in search results`);
+  throw new Error(`Contact ${phone} not found or chat failed to open`);
 }
 
 async function injectMessage(text) {
@@ -91,7 +86,21 @@ async function injectMessage(text) {
   document.execCommand('insertText', false, text);
   messageBox.dispatchEvent(new Event('input', { bubbles: true }));
   console.log(`[WA Auto] Message text injected`);
+  
   await sleep(1000);
+
+  // Send via Enter keypress as requested
+  console.log(`[WA Auto] Sending message via Enter keypress`);
+  const enterEvent = new KeyboardEvent('keydown', {
+    key: 'Enter',
+    code: 'Enter',
+    keyCode: 13,
+    which: 13,
+    bubbles: true,
+    cancelable: true
+  });
+  messageBox.dispatchEvent(enterEvent);
+  
   return true;
 }
 
