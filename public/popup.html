@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WhatsApp Automation</title>
+  <style>
+    body {
+      width: 320px;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #f8fafc;
+      margin: 0;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logo {
+      width: 40px;
+      height: 40px;
+      background-color: #22c55e;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 20px;
+      font-weight: bold;
+    }
+    h1 {
+      font-size: 16px;
+      margin: 0;
+      color: #0f172a;
+    }
+    .status-card {
+      background: white;
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid #e2e8f0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+    }
+    .status-label {
+      color: #64748b;
+    }
+    .status-value {
+      font-weight: 600;
+      color: #0f172a;
+    }
+    .badge {
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      text-transform: uppercase;
+      font-weight: bold;
+    }
+    .badge-idle { background: #f1f5f9; color: #475569; }
+    .badge-running { background: #dcfce7; color: #166534; }
+    .badge-paused { background: #fef3c7; color: #92400e; }
+    
+    .progress-bar {
+      width: 100%;
+      height: 6px;
+      background: #f1f5f9;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: #22c55e;
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .btn {
+      padding: 10px;
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    .btn-primary { background: #22c55e; color: white; }
+    .btn-primary:hover { background: #16a34a; }
+    .btn-primary:disabled { background: #94a3b8; cursor: not-allowed; }
+    
+    .btn-danger { background: #ef4444; color: white; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-danger:disabled { background: #fca5a5; cursor: not-allowed; }
+
+    .btn-outline { background: white; border: 1px solid #e2e8f0; color: #475569; }
+    .btn-outline:hover { background: #f8fafc; }
+
+    .footer-link {
+      text-align: center;
+      font-size: 12px;
+      color: #22c55e;
+      text-decoration: none;
+      font-weight: 500;
+      margin-top: 4px;
+    }
+    .footer-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo">WA</div>
+      <h1>WhatsApp Automation</h1>
+    </div>
+
+    <div class="status-card">
+      <div class="status-row">
+        <span class="status-label">Status</span>
+        <span id="status-text" class="badge badge-idle">Idle</span>
+      </div>
+      <div class="status-row">
+        <span class="status-label">Progress</span>
+        <span id="progress-text" class="status-value">0 / 0</span>
+      </div>
+      <div class="progress-bar">
+        <div id="progress-fill" class="progress-fill"></div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button id="start-btn" class="btn btn-primary">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        Start
+      </button>
+      <button id="stop-btn" class="btn btn-danger" disabled>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h12v12H6z"/></svg>
+        Stop
+      </button>
+    </div>
+
+    <button id="open-dashboard" class="btn btn-outline">
+      Open Full Dashboard
+    </button>
+    
+    <a href="#" id="wa-link" class="footer-link">Open WhatsApp Web</a>
+  </div>
+
+  <script>
+    const statusText = document.getElementById('status-text');
+    const progressText = document.getElementById('progress-text');
+    const progressFill = document.getElementById('progress-fill');
+    const startBtn = document.getElementById('start-btn');
+    const stopBtn = document.getElementById('stop-btn');
+
+    function updateUI() {
+      chrome.runtime.sendMessage({ action: "get_status" }, (response) => {
+        if (!response) return;
+
+        const { status, currentIndex, total } = response;
+        
+        // Update Status Badge
+        statusText.textContent = status;
+        statusText.className = `badge badge-${status}`;
+
+        // Update Progress
+        const current = currentIndex === -1 ? 0 : currentIndex;
+        progressText.textContent = `${current} / ${total}`;
+        
+        const percent = total > 0 ? (current / total) * 100 : 0;
+        progressFill.style.width = `${percent}%`;
+
+        // Update Buttons
+        if (status === 'running') {
+          startBtn.disabled = true;
+          startBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="animate-spin"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg> Running';
+          stopBtn.disabled = false;
+        } else if (status === 'paused') {
+          startBtn.disabled = false;
+          startBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Resume';
+          stopBtn.disabled = false;
+        } else {
+          startBtn.disabled = false;
+          startBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Start';
+          stopBtn.disabled = true;
+        }
+      });
+    }
+
+    startBtn.addEventListener('click', () => {
+      chrome.runtime.sendMessage({ action: "get_status" }, (statusRes) => {
+        if (statusRes.status === 'paused') {
+          chrome.runtime.sendMessage({ action: "resume_queue" });
+        } else {
+          // If idle, we need the contacts from storage
+          chrome.storage.local.get(['contacts', 'settings'], (data) => {
+            if (data.contacts && data.contacts.length > 0) {
+              chrome.runtime.sendMessage({ 
+                action: "start_queue", 
+                contacts: data.contacts, 
+                settings: data.settings 
+              });
+            } else {
+              alert("Please add contacts in the dashboard first!");
+              chrome.runtime.openOptionsPage();
+            }
+          });
+        }
+      });
+    });
+
+    stopBtn.addEventListener('click', () => {
+      chrome.runtime.sendMessage({ action: "stop_queue" });
+    });
+
+    document.getElementById('open-dashboard').addEventListener('click', () => {
+      chrome.runtime.openOptionsPage();
+    });
+
+    document.getElementById('wa-link').addEventListener('click', (e) => {
+      e.preventDefault();
+      window.open('https://web.whatsapp.com', '_blank');
+    });
+
+    // Poll for updates
+    updateUI();
+    setInterval(updateUI, 1000);
+  </script>
+</body>
+</html>
