@@ -91,6 +91,7 @@ interface AppSettings {
   pasteDelay: number;
   sendDelay: number;
   useSmartWait: boolean;
+  useDirectOpen: boolean;
   autoStartTime?: string; // ISO string or empty
 }
 
@@ -105,6 +106,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   pasteDelay: 4000,
   sendDelay: 2000,
   useSmartWait: true,
+  useDirectOpen: true,
   autoStartTime: ""
 };
 
@@ -230,12 +232,19 @@ export default function App() {
 
   const openDirectChat = (phone: string) => {
     if (!phone) {
-      toast.error("Phone number is required");
+      toast.error("Contact ID/Phone is required");
       return;
     }
     
+    // Use the exact string as requested by the user (no trimming/cleaning here)
+    const target = phone.trim();
+    
     if (typeof chrome !== 'undefined' && chrome.runtime) {
-      chrome.runtime.sendMessage({ action: "OPEN_CHAT", phone }, (response) => {
+      chrome.runtime.sendMessage({ 
+        action: "OPEN_CHAT", 
+        phone: target,
+        useDirectMethod: true // Signal to use WPP.chat.open or similar
+      }, (response) => {
         if (response && !response.success) {
           toast.error(response.error || "Failed to open chat");
         }
@@ -246,7 +255,7 @@ export default function App() {
         // @ts-ignore
         if (window.WPP && window.WPP.chat) {
           // @ts-ignore
-          window.WPP.chat.open(phone);
+          window.WPP.chat.open(target);
         } else {
           toast.info("Direct opening requires the extension context.");
         }
@@ -276,7 +285,7 @@ export default function App() {
         id: crypto.randomUUID(),
         sr_no: (contacts.length + idx + 1).toString(),
         name: row.Name || row.name || "",
-        phone: (row.Phone || row.phone || row['Mobile Number'] || "").toString().replace(/\D/g, ''),
+        phone: (row.Phone || row.phone || row['Mobile Number'] || "").toString().trim(),
         message_template: row.Message || row.message || row['Message Template'] || settings.defaultTemplate,
         status: 'pending'
       }));
@@ -481,7 +490,10 @@ export default function App() {
       chrome.runtime.sendMessage({ 
         action: "start_queue", 
         contacts: preparedContacts,
-        settings
+        settings: {
+          ...settings,
+          useDirectOpen: settings.useDirectOpen // Ensure this is passed
+        }
       }, (response) => {
         setQueueStatus('running');
         toast.success("Group campaign started");
@@ -525,7 +537,10 @@ export default function App() {
       chrome.runtime.sendMessage({ 
         action: "start_queue", 
         contacts: preparedContacts,
-        settings
+        settings: {
+          ...settings,
+          useDirectOpen: settings.useDirectOpen // Ensure this is passed
+        }
       }, (response) => {
         setQueueStatus('running');
         toast.success("Automation started");
@@ -911,6 +926,9 @@ export default function App() {
               <div className="flex flex-col">
                 <h2 className="text-xl font-bold">Group Campaign</h2>
                 <p className="text-xs text-slate-500">Select groups to start a bulk messaging campaign.</p>
+                <div className="mt-2 p-2 bg-blue-50 border border-blue-100 rounded-md text-[10px] text-blue-700 max-w-md">
+                  <strong>Current Default Message:</strong> {settings.defaultTemplate.substring(0, 100)}{settings.defaultTemplate.length > 100 ? '...' : ''}
+                </div>
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={fetchGroups} disabled={isScraping}>
@@ -1171,6 +1189,19 @@ export default function App() {
                     <div className="space-y-0.5">
                       <Label htmlFor="useSmartWait" className="text-sm font-bold">Smart Wait (Recommended)</Label>
                       <p className="text-[10px] text-slate-500 leading-tight">Proceed immediately when elements appear instead of fixed delays.</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 p-2 bg-green-50 rounded border border-green-100">
+                    <input 
+                      type="checkbox" 
+                      id="useDirectOpen"
+                      checked={settings.useDirectOpen}
+                      onChange={(e) => setSettings({...settings, useDirectOpen: e.target.checked})}
+                    />
+                    <div className="space-y-0.5">
+                      <Label htmlFor="useDirectOpen" className="text-sm font-bold text-green-700">Direct Open Mode</Label>
+                      <p className="text-[10px] text-green-600 leading-tight">Skip search and open chats directly using internal commands.</p>
                     </div>
                   </div>
                   
