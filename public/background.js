@@ -176,7 +176,8 @@ async function processNext() {
         srNo: contact.sr_no,
         phone: contact.phone,
         message: contact.message,
-        rawRow: contact
+        rawRow: contact,
+        settings: settings // Pass settings here
       }
     });
 

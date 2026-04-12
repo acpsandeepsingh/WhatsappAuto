@@ -122,6 +122,7 @@ export default function App() {
   const [groupSearchTerm, setGroupSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'contacts' | 'groups' | 'scraping'>('contacts');
   const [isScraping, setIsScraping] = useState(false);
+  const [openingChatId, setOpeningChatId] = useState<string | null>(null);
   const [queueStatus, setQueueStatus] = useState<'idle' | 'running' | 'paused' | 'stopped'>('idle');
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
@@ -238,6 +239,7 @@ export default function App() {
     
     // Use the exact string as requested by the user (no trimming/cleaning here)
     const target = phone.trim();
+    setOpeningChatId(target);
     
     if (typeof chrome !== 'undefined' && chrome.runtime) {
       chrome.runtime.sendMessage({ 
@@ -245,8 +247,11 @@ export default function App() {
         phone: target,
         useDirectMethod: true // Signal to use WPP.chat.open or similar
       }, (response) => {
+        setOpeningChatId(null);
         if (response && !response.success) {
           toast.error(response.error || "Failed to open chat");
+        } else {
+          toast.success("Chat opened successfully");
         }
       });
     } else {
@@ -256,6 +261,7 @@ export default function App() {
         if (window.WPP && window.WPP.chat) {
           // @ts-ignore
           window.WPP.chat.open(target);
+          toast.success("Chat opened successfully");
         } else {
           toast.info("Direct opening requires the extension context.");
         }
@@ -263,6 +269,7 @@ export default function App() {
         console.error(e);
         toast.error("Failed to execute direct open command");
       }
+      setOpeningChatId(null);
     }
   };
 
@@ -475,11 +482,13 @@ export default function App() {
         id: crypto.randomUUID(),
         sr_no: (contacts.length + idx + 1).toString(),
         name: group?.subject || "Unknown Group",
-        phone: group?.subject || "", // For groups, we search by name
+        phone: group?.id || group?.subject || "", // Prefer ID for direct open
         message_template: settings.defaultTemplate,
         status: 'pending'
       };
     });
+
+    setContacts(prev => [...prev, ...groupContacts]);
 
     const preparedContacts = groupContacts.map(c => ({
       ...c,
@@ -497,6 +506,7 @@ export default function App() {
       }, (response) => {
         setQueueStatus('running');
         toast.success("Group campaign started");
+        setActiveTab('contacts'); // Switch to contacts tab to see progress
       });
     }
   };
@@ -896,8 +906,13 @@ export default function App() {
                                   className="opacity-0 group-hover:opacity-100 text-blue-500 hover:text-blue-600"
                                   onClick={() => openDirectChat(contact.phone)}
                                   title="Direct Open Chat"
+                                  disabled={openingChatId === contact.phone}
                                 >
-                                  <ExternalLink className="w-4 h-4" />
+                                  {openingChatId === contact.phone ? (
+                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <ExternalLink className="w-4 h-4" />
+                                  )}
                                 </Button>
                                 <Button 
                                   variant="ghost" 
@@ -999,8 +1014,13 @@ export default function App() {
                                   onClick={() => openDirectChat(group.id)}
                                   className="text-slate-600 border-slate-200 hover:bg-slate-50"
                                   title="Open Group Chat"
+                                  disabled={openingChatId === group.id}
                                 >
-                                  <ExternalLink className="w-3 h-3 mr-1" />
+                                  {openingChatId === group.id ? (
+                                    <RefreshCw className="w-3 h-3 mr-1 animate-spin" />
+                                  ) : (
+                                    <ExternalLink className="w-3 h-3 mr-1" />
+                                  )}
                                   Open
                                 </Button>
                                 <Button 

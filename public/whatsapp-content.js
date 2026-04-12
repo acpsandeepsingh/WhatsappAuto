@@ -1523,7 +1523,81 @@ async function confirmChatSwitched(expectedContact, timeoutMs = 12000, context =
   return false;
 }
 
-async function openChatBySearch(queryValue) {
+async function openChatDirectly(id) {
+  log('[Direct] Attempting internal open for:', id);
+  return new Promise((resolve, reject) => {
+    const scriptId = 'wa-direct-open-script-' + Date.now();
+    const script = document.createElement('script');
+    script.id = scriptId;
+    
+    // We use a custom event to get the result back from the page context
+    const eventName = 'wa-direct-open-result-' + id.replace(/[^\w]/g, '');
+    
+    script.textContent = `
+      (async () => {
+        const targetId = '${id}';
+        const eventName = '${eventName}';
+        try {
+          let opened = false;
+          // Try WPP first (common in these environments)
+          if (window.WPP && window.WPP.chat && typeof window.WPP.chat.open === 'function') {
+            await window.WPP.chat.open(targetId);
+            opened = true;
+          } 
+          // Fallback to window.Store (legacy/internal)
+          else if (window.Store && window.Store.Chat && typeof window.Store.Chat.find === 'function') {
+            const chat = await window.Store.Chat.find(targetId);
+            if (chat) {
+              await chat.open();
+              opened = true;
+            }
+          }
+          
+          window.dispatchEvent(new CustomEvent(eventName, { 
+            detail: { success: opened, error: opened ? null : 'WPP or Store.Chat.find not available or failed to find chat' } 
+          }));
+        } catch (e) {
+          window.dispatchEvent(new CustomEvent(eventName, { 
+            detail: { success: false, error: e.message } 
+          }));
+        }
+      })();
+    `;
+
+    const onResult = (event) => {
+      window.removeEventListener(eventName, onResult);
+      if (script.parentNode) script.remove();
+      if (event.detail.success) {
+        log('[Direct] Success for:', id);
+        resolve(true);
+      } else {
+        log('[Direct] Failed for:', id, event.detail.error);
+        reject(new Error(event.detail.error));
+      }
+    };
+
+    window.addEventListener(eventName, onResult);
+    (document.head || document.documentElement).appendChild(script);
+    
+    // Timeout after 5 seconds
+    setTimeout(() => {
+      window.removeEventListener(eventName, onResult);
+      if (script.parentNode) script.remove();
+      reject(new Error('Direct open timeout (5s)'));
+    }, 5000);
+  });
+}
+
+async function openChatBySearch(queryValue, useDirectMethod = false) {
+  if (useDirectMethod) {
+    try {
+      return await openChatDirectly(queryValue);
+    } catch (e) {
+      log('[Direct] Direct method failed:', e.message);
+      // Strictly avoid falling back to search if direct method is requested
+      throw new Error(`Direct open failed for "${queryValue}": ${e.message}. Skip search is enabled.`);
+    }
+  }
   return openChat(queryValue);
 }
 
@@ -1951,22 +2025,31 @@ async function scrapeGroupContacts(groupName, options = {}) {
   return [...uniqueByPhone.values()];
 }
 
-async function sendSingleMessage({ srNo, phone, message, attachmentUrl, attachmentSendingEnabled = true, rawRow = {} }) {
+async function sendSingleMessage({ srNo, phone, message, attachmentUrl, attachmentSendingEnabled = true, rawRow = {}, settings = {} }) {
   log('Processing row', srNo, phone);
-  log('Loop started');
+  log('Loop started', { useDirectOpen: settings.useDirectOpen });
 
   const openChatErrors = [];
-  const chatQueries = [
-    normalizePhone(phone),
-    cleanText(rawRow.mobileNumber || rawRow.mobile || ''),
-    cleanText(rawRow.name || rawRow.contactName || '')
-  ].filter(Boolean);
+  
+  // If Direct Open is enabled, we ONLY use the exact phone/ID provided
+  const chatQueries = settings.useDirectOpen 
+    ? [String(phone || '').trim()]
+    : [
+        normalizePhone(phone),
+        cleanText(rawRow.mobileNumber || rawRow.mobile || ''),
+        cleanText(rawRow.name || rawRow.contactName || '')
+      ].filter(Boolean);
 
   let opened = false;
   for (const query of chatQueries) {
     try {
-      if (isLikelyPhoneQuery(query)) await openChatByPhone(query);
-      else await openChatBySearch(query);
+      if (settings.useDirectOpen) {
+        await openChatBySearch(query, true);
+      } else if (isLikelyPhoneQuery(query)) {
+        await openChatByPhone(query);
+      } else {
+        await openChatBySearch(query);
+      }
       opened = true;
       break;
     } catch (error) {
@@ -2125,7 +2208,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         await chrome.storage.local.set({ isRunning: true });
         await withLock('automation', async () => {
           await waitForTypingLock('open-chat-action-wait');
-          await openChatBySearch(message.query || message.phone || '');
+          await openChatBySearch(
+            message.query || message.phone || '', 
+            message.useDirectMethod || false
+          );
         });
         sendResponse({ success: true });
         break;
