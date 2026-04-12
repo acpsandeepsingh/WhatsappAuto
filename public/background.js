@@ -90,7 +90,56 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
     })();
     return true;
-  } else if (["GET_GROUPS", "FETCH_CONTACTS", "SCRAPE_GROUP", "GET_CHAT_SNAPSHOT", "STOP_CONTACT_FETCH", "SEND_MESSAGE"].includes(request.action)) {
+  } else if (request.action === "INTERNAL_DIRECT_OPEN") {
+    (async () => {
+      try {
+        const tabs = await chrome.tabs.query({ url: "https://web.whatsapp.com/*" });
+        if (tabs.length === 0) {
+          sendResponse({ success: false, error: "WhatsApp Web tab not found" });
+          return;
+        }
+        const tabId = tabs[0].id;
+        
+        const result = await chrome.scripting.executeScript({
+          target: { tabId },
+          world: 'MAIN',
+          func: (id) => {
+            return new Promise(async (resolve) => {
+              try {
+                let opened = false;
+                // Try WPP first
+                if (window.WPP && window.WPP.chat && typeof window.WPP.chat.open === 'function') {
+                  await window.WPP.chat.open(id);
+                  opened = true;
+                } 
+                // Fallback to window.Store
+                else if (window.Store && window.Store.Chat && typeof window.Store.Chat.find === 'function') {
+                  const chat = await window.Store.Chat.find(id);
+                  if (chat) {
+                    await chat.open();
+                    opened = true;
+                  }
+                }
+                resolve({ success: opened, error: opened ? null : 'WPP or Store.Chat.find not available or failed to find chat' });
+              } catch (e) {
+                resolve({ success: false, error: e.message });
+              }
+            });
+          },
+          args: [request.id]
+        });
+        
+        if (result && result[0] && result[0].result) {
+          sendResponse(result[0].result);
+        } else {
+          sendResponse({ success: false, error: "Failed to execute script in page context" });
+        }
+      } catch (e) {
+        sendResponse({ success: false, error: e.message });
+      }
+    })();
+    return true;
+  } else if (["GET_GROUPS", "FETCH_CONTACTS", "SCRAPE_GROUP", "GET_CHAT_SNAPSHOT", "STOP_CONTACT_FETCH", "SEND_MESSAGE", "OPEN_CHAT"].includes(request.action)) {
     // Proxy these actions to the WhatsApp tab
     (async () => {
       try {

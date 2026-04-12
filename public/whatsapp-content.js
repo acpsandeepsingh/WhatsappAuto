@@ -1524,67 +1524,18 @@ async function confirmChatSwitched(expectedContact, timeoutMs = 12000, context =
 }
 
 async function openChatDirectly(id) {
-  log('[Direct] Attempting internal open for:', id);
+  log('[Direct] Requesting background to open chat:', id);
   return new Promise((resolve, reject) => {
-    const scriptId = 'wa-direct-open-script-' + Date.now();
-    const script = document.createElement('script');
-    script.id = scriptId;
-    
-    // We use a custom event to get the result back from the page context
-    const eventName = 'wa-direct-open-result-' + id.replace(/[^\w]/g, '');
-    
-    script.textContent = `
-      (async () => {
-        const targetId = '${id}';
-        const eventName = '${eventName}';
-        try {
-          let opened = false;
-          // Try WPP first (common in these environments)
-          if (window.WPP && window.WPP.chat && typeof window.WPP.chat.open === 'function') {
-            await window.WPP.chat.open(targetId);
-            opened = true;
-          } 
-          // Fallback to window.Store (legacy/internal)
-          else if (window.Store && window.Store.Chat && typeof window.Store.Chat.find === 'function') {
-            const chat = await window.Store.Chat.find(targetId);
-            if (chat) {
-              await chat.open();
-              opened = true;
-            }
-          }
-          
-          window.dispatchEvent(new CustomEvent(eventName, { 
-            detail: { success: opened, error: opened ? null : 'WPP or Store.Chat.find not available or failed to find chat' } 
-          }));
-        } catch (e) {
-          window.dispatchEvent(new CustomEvent(eventName, { 
-            detail: { success: false, error: e.message } 
-          }));
-        }
-      })();
-    `;
-
-    const onResult = (event) => {
-      window.removeEventListener(eventName, onResult);
-      if (script.parentNode) script.remove();
-      if (event.detail.success) {
-        log('[Direct] Success for:', id);
+    chrome.runtime.sendMessage({ action: 'INTERNAL_DIRECT_OPEN', id }, (response) => {
+      if (response && response.success) {
+        log('[Direct] Background reported success for:', id);
         resolve(true);
       } else {
-        log('[Direct] Failed for:', id, event.detail.error);
-        reject(new Error(event.detail.error));
+        const error = response?.error || 'Unknown error from background';
+        log('[Direct] Background reported failure for:', id, error);
+        reject(new Error(error));
       }
-    };
-
-    window.addEventListener(eventName, onResult);
-    (document.head || document.documentElement).appendChild(script);
-    
-    // Timeout after 5 seconds
-    setTimeout(() => {
-      window.removeEventListener(eventName, onResult);
-      if (script.parentNode) script.remove();
-      reject(new Error('Direct open timeout (5s)'));
-    }, 5000);
+    });
   });
 }
 
