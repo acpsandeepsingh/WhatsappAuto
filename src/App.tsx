@@ -117,6 +117,7 @@ export default function App() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [groupSearchTerm, setGroupSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'contacts' | 'groups' | 'scraping'>('contacts');
   const [isScraping, setIsScraping] = useState(false);
   const [queueStatus, setQueueStatus] = useState<'idle' | 'running' | 'paused' | 'stopped'>('idle');
@@ -220,6 +221,41 @@ export default function App() {
       c.phone.includes(searchTerm)
     );
   }, [contacts, searchTerm]);
+
+  const filteredGroups = useMemo(() => {
+    return groups.filter(g => 
+      g.subject.toLowerCase().includes(groupSearchTerm.toLowerCase())
+    );
+  }, [groups, groupSearchTerm]);
+
+  const openDirectChat = (phone: string) => {
+    if (!phone) {
+      toast.error("Phone number is required");
+      return;
+    }
+    
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
+      chrome.runtime.sendMessage({ action: "OPEN_CHAT", phone }, (response) => {
+        if (response && !response.success) {
+          toast.error(response.error || "Failed to open chat");
+        }
+      });
+    } else {
+      // Fallback for direct execution if script is injected
+      try {
+        // @ts-ignore
+        if (window.WPP && window.WPP.chat) {
+          // @ts-ignore
+          window.WPP.chat.open(phone);
+        } else {
+          toast.info("Direct opening requires the extension context.");
+        }
+      } catch (e) {
+        console.error(e);
+        toast.error("Failed to execute direct open command");
+      }
+    }
+  };
 
   /**
    * Handles CSV/XLS file import and parses it into the contact list.
@@ -532,6 +568,9 @@ export default function App() {
       toast.error("No data to download");
       return;
     }
+    
+    const safePrefix = (filenamePrefix || 'whatsapp_automation').replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    
     const data = dataToDownload.map(c => ({
       'Sr. No': c.sr_no,
       'Name': c.name,
@@ -540,18 +579,24 @@ export default function App() {
       'Status': c.status || 'pending',
       'Error': c.error || ''
     }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    const csv = XLSX.utils.sheet_to_csv(ws);
-    const blob = new Blob(["\ufeff", csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", `${filenamePrefix}_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+
+    try {
+      const ws = XLSX.utils.json_to_sheet(data);
+      const csv = XLSX.utils.sheet_to_csv(ws);
+      const blob = new Blob(["\ufeff", csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${safePrefix}_${new Date().getTime()}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast.success(`Downloaded ${dataToDownload.length} items`);
+    } catch (error) {
+      console.error("Download failed:", error);
+      toast.error("Failed to generate CSV file");
+    }
   };
 
   /**
@@ -829,14 +874,25 @@ export default function App() {
                               </div>
                             </TableCell>
                             <TableCell>
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500"
-                                onClick={() => setContacts(contacts.filter(c => c.id !== contact.id))}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
+                              <div className="flex justify-end gap-2">
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="opacity-0 group-hover:opacity-100 text-blue-500 hover:text-blue-600"
+                                  onClick={() => openDirectChat(contact.phone)}
+                                  title="Direct Open Chat"
+                                >
+                                  <ExternalLink className="w-4 h-4" />
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500"
+                                  onClick={() => setContacts(contacts.filter(c => c.id !== contact.id))}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
                             </TableCell>
                           </motion.tr>
                         ))}
@@ -852,7 +908,10 @@ export default function App() {
         {activeTab === 'groups' && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold">Group Campaign</h2>
+              <div className="flex flex-col">
+                <h2 className="text-xl font-bold">Group Campaign</h2>
+                <p className="text-xs text-slate-500">Select groups to start a bulk messaging campaign.</p>
+              </div>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={fetchGroups} disabled={isScraping}>
                   {isScraping ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
@@ -867,11 +926,22 @@ export default function App() {
 
             <Card className="border-none shadow-sm">
               <CardHeader className="border-b">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg">Select Groups ({selectedGroups.length} selected)</CardTitle>
-                  <Button variant="ghost" size="sm" onClick={selectAllGroups}>
-                    {selectedGroups.length === groups.length ? "Deselect All" : "Select All"}
-                  </Button>
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <CardTitle className="text-lg">Select Groups ({selectedGroups.length} selected)</CardTitle>
+                    <Button variant="ghost" size="sm" onClick={selectAllGroups}>
+                      {selectedGroups.length === groups.length ? "Deselect All" : "Select All"}
+                    </Button>
+                  </div>
+                  <div className="relative w-full md:w-80">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <Input 
+                      placeholder="Search groups..." 
+                      className="pl-10" 
+                      value={groupSearchTerm}
+                      onChange={(e) => setGroupSearchTerm(e.target.value)}
+                    />
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="p-0">
@@ -885,14 +955,14 @@ export default function App() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {groups.length === 0 ? (
+                      {filteredGroups.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={3} className="text-center py-8 text-slate-500">
-                            No groups found. Click "Refresh Groups" to load them.
+                            {groupSearchTerm ? "No groups match your search." : "No groups found. Click \"Refresh Groups\" to load them."}
                           </TableCell>
                         </TableRow>
                       ) : (
-                        groups.map((group) => (
+                        filteredGroups.map((group) => (
                           <TableRow key={group.id} className="hover:bg-slate-50">
                             <TableCell>
                               <input 
@@ -905,6 +975,16 @@ export default function App() {
                             <TableCell className="font-medium">{group.subject}</TableCell>
                             <TableCell className="text-right">
                               <div className="flex justify-end gap-2">
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  onClick={() => openDirectChat(group.id)}
+                                  className="text-slate-600 border-slate-200 hover:bg-slate-50"
+                                  title="Open Group Chat"
+                                >
+                                  <ExternalLink className="w-3 h-3 mr-1" />
+                                  Open
+                                </Button>
                                 <Button 
                                   variant="outline" 
                                   size="sm" 
