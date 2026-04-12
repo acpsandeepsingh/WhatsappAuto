@@ -70,34 +70,46 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function ensureConnection(callback) {
+    chrome.runtime.sendMessage({ action: "CHECK_CONNECTION" }, (res) => {
+      if (res && res.success) {
+        callback();
+      } else {
+        alert("Error: " + (res?.error || "Could not connect to WhatsApp. Make sure it's open and loaded."));
+      }
+    });
+  }
+
   if (startBtn) {
     startBtn.addEventListener('click', () => {
       if (!isExtension) return;
       console.log("[Popup] Start/Resume clicked");
       
-      chrome.runtime.sendMessage({ action: "get_status" }, (statusRes) => {
-        if (statusRes && statusRes.status === 'paused') {
-          console.log("[Popup] Sending resume_queue");
-          chrome.runtime.sendMessage({ action: "resume_queue" }, () => updateUI());
-        } else {
-          console.log("[Popup] Starting new queue from storage");
-          chrome.storage.local.get(['contacts', 'settings'], (data) => {
-            if (data.contacts && data.contacts.length > 0) {
-              console.log(`[Popup] Sending ${data.contacts.length} contacts to background`);
-              chrome.runtime.sendMessage({ 
-                action: "start_queue", 
-                contacts: data.contacts, 
-                settings: data.settings 
-              }, (res) => {
-                console.log("[Popup] Start response:", res);
-                updateUI();
-              });
-            } else {
-              alert("Please add contacts in the dashboard first!");
-              chrome.runtime.openOptionsPage();
-            }
-          });
-        }
+      ensureConnection(() => {
+        chrome.runtime.sendMessage({ action: "get_status" }, (statusRes) => {
+          if (statusRes && statusRes.status === 'paused') {
+            console.log("[Popup] Sending resume_queue");
+            chrome.runtime.sendMessage({ action: "resume_queue" }, () => updateUI());
+          } else {
+            console.log("[Popup] Starting new queue from storage");
+            chrome.storage.local.get(['contacts', 'settings'], (data) => {
+              if (data.contacts && data.contacts.length > 0) {
+                console.log(`[Popup] Sending ${data.contacts.length} contacts to background`);
+                chrome.runtime.sendMessage({ 
+                  action: "start_queue", 
+                  contacts: data.contacts, 
+                  settings: data.settings 
+                }, (res) => {
+                  console.log("[Popup] Start response:", res);
+                  updateUI();
+                });
+              } else {
+                alert("Please add contacts in the dashboard first!");
+                chrome.runtime.openOptionsPage();
+              }
+            });
+          }
+        });
       });
     });
   }
@@ -109,6 +121,53 @@ document.addEventListener('DOMContentLoaded', () => {
       chrome.runtime.sendMessage({ action: "stop_queue" }, (res) => {
         console.log("[Popup] Stop response:", res);
         updateUI();
+      });
+    });
+  }
+
+  const scrapeSidebarBtn = document.getElementById('scrape-sidebar-btn');
+  const scrapeGroupBtn = document.getElementById('scrape-group-btn');
+
+  if (scrapeSidebarBtn) {
+    scrapeSidebarBtn.addEventListener('click', () => {
+      if (!isExtension) return;
+      
+      ensureConnection(() => {
+        scrapeSidebarBtn.disabled = true;
+        scrapeSidebarBtn.textContent = 'Scraping...';
+        
+        chrome.runtime.sendMessage({ action: "FETCH_CONTACTS", type: 'all_contacts' }, (res) => {
+          scrapeSidebarBtn.disabled = false;
+          scrapeSidebarBtn.textContent = 'Scrape Sidebar Contacts';
+          
+          if (res && res.success) {
+            alert(`Successfully scraped ${res.contacts.length} contacts! They are now in your dashboard.`);
+          } else {
+            alert("Error: " + (res?.error || "Could not connect to WhatsApp. Make sure it's open and loaded."));
+          }
+        });
+      });
+    });
+  }
+
+  if (scrapeGroupBtn) {
+    scrapeGroupBtn.addEventListener('click', () => {
+      if (!isExtension) return;
+      
+      ensureConnection(() => {
+        scrapeGroupBtn.disabled = true;
+        scrapeGroupBtn.textContent = 'Scraping...';
+        
+        chrome.runtime.sendMessage({ action: "SCRAPE_GROUP" }, (res) => {
+          scrapeGroupBtn.disabled = false;
+          scrapeGroupBtn.textContent = 'Scrape Open Group Members';
+          
+          if (res && res.success) {
+            alert(`Successfully scraped ${res.contacts.length} members! They are now in your dashboard.`);
+          } else {
+            alert("Error: " + (res?.error || "Could not connect to WhatsApp. Make sure a group is open and members list is visible."));
+          }
+        });
       });
     });
   }

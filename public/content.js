@@ -344,6 +344,10 @@ async function clickSend() {
  * Handles "process_row" to automate a single contact.
  */
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "PING") {
+    sendResponse({ success: true });
+    return true;
+  }
   if (request.action === "process_row") {
     console.log(`[WA Auto] Received process_row command`);
     

@@ -24,7 +24,15 @@ import {
   X,
   Save,
   RefreshCw,
-  FileText
+  FileText,
+  Users,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  Filter,
+  Check,
+  Clock,
+  Send
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -288,17 +296,32 @@ export default function App() {
       .replace(/{{sr_no}}/g, contact.sr_no);
   };
 
+  const withConnection = (callback: () => void) => {
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
+      chrome.runtime.sendMessage({ action: "CHECK_CONNECTION" }, (res) => {
+        if (res && res.success) {
+          callback();
+        } else {
+          toast.error(res?.error || "Could not connect to WhatsApp. Make sure it's open and loaded.");
+          setIsScraping(false);
+        }
+      });
+    }
+  };
+
   const fetchGroups = () => {
     if (typeof chrome !== 'undefined' && chrome.runtime) {
       setIsScraping(true);
-      chrome.runtime.sendMessage({ action: "GET_GROUPS" }, (response) => {
-        setIsScraping(false);
-        if (response && response.success) {
-          setGroups(response.groups);
-          toast.success(`Loaded ${response.groups.length} groups`);
-        } else {
-          toast.error(response?.error || "Failed to load groups");
-        }
+      withConnection(() => {
+        chrome.runtime.sendMessage({ action: "GET_GROUPS" }, (response) => {
+          setIsScraping(false);
+          if (response && response.success) {
+            setGroups(response.groups);
+            toast.success(`Loaded ${response.groups.length} groups`);
+          } else {
+            toast.error(response?.error || "Failed to load groups");
+          }
+        });
       });
     }
   };
@@ -306,25 +329,27 @@ export default function App() {
   const fetchContactsFromSidebar = (filterType: string = 'all_contacts') => {
     if (typeof chrome !== 'undefined' && chrome.runtime) {
       setIsScraping(true);
-      chrome.runtime.sendMessage({ 
-        action: "FETCH_CONTACTS",
-        filter: { primary: filterType }
-      }, (response) => {
-        setIsScraping(false);
-        if (response && response.success) {
-          const newContacts: Contact[] = response.data.map((c: any, idx: number) => ({
-            id: crypto.randomUUID(),
-            sr_no: (contacts.length + idx + 1).toString(),
-            name: c.name || "Unknown",
-            phone: c.phone || "",
-            message_template: settings.defaultTemplate,
-            status: 'pending'
-          }));
-          setContacts([...contacts, ...newContacts]);
-          toast.success(`Fetched ${newContacts.length} contacts from sidebar`);
-        } else {
-          toast.error(response?.error || "Failed to fetch contacts");
-        }
+      withConnection(() => {
+        chrome.runtime.sendMessage({ 
+          action: "FETCH_CONTACTS",
+          filter: { primary: filterType }
+        }, (response) => {
+          setIsScraping(false);
+          if (response && response.success) {
+            const newContacts: Contact[] = response.data.map((c: any, idx: number) => ({
+              id: crypto.randomUUID(),
+              sr_no: (contacts.length + idx + 1).toString(),
+              name: c.name || "Unknown",
+              phone: c.phone || "",
+              message_template: settings.defaultTemplate,
+              status: 'pending'
+            }));
+            setContacts([...contacts, ...newContacts]);
+            toast.success(`Fetched ${newContacts.length} contacts from sidebar`);
+          } else {
+            toast.error(response?.error || "Failed to fetch contacts");
+          }
+        });
       });
     }
   };
@@ -332,25 +357,49 @@ export default function App() {
   const scrapeGroupMembers = (groupId: string, groupName: string) => {
     if (typeof chrome !== 'undefined' && chrome.runtime) {
       setIsScraping(true);
-      chrome.runtime.sendMessage({ 
-        action: "SCRAPE_GROUP",
-        groupName: groupName
-      }, (response) => {
-        setIsScraping(false);
-        if (response && response.success) {
-          const newContacts: Contact[] = response.data.map((c: any, idx: number) => ({
-            id: crypto.randomUUID(),
-            sr_no: (contacts.length + idx + 1).toString(),
-            name: c.name || "Unknown",
-            phone: c.phone || "",
-            message_template: settings.defaultTemplate,
-            status: 'pending'
-          }));
-          setContacts([...contacts, ...newContacts]);
-          toast.success(`Scraped ${newContacts.length} members from ${groupName}`);
-        } else {
-          toast.error(response?.error || "Failed to scrape group. Make sure the group is open and 'View All' is visible.");
-        }
+      withConnection(() => {
+        // Use the fast IndexedDB-based scraping
+        chrome.runtime.sendMessage({ 
+          action: "FETCH_CONTACTS",
+          filter: { primary: 'group', secondary: groupId }
+        }, (response) => {
+          setIsScraping(false);
+          if (response && response.success) {
+            const newContacts: Contact[] = response.data.map((c: any, idx: number) => ({
+              id: crypto.randomUUID(),
+              sr_no: (contacts.length + idx + 1).toString(),
+              name: c.name || "Unknown",
+              phone: c.phone || "",
+              message_template: settings.defaultTemplate,
+              status: 'pending'
+            }));
+            setContacts([...contacts, ...newContacts]);
+            toast.success(`Scraped ${newContacts.length} members from ${groupName} (Fast)`);
+          } else {
+            // Fallback to the UI-based scraping if IndexedDB fails or is empty
+            setIsScraping(true);
+            chrome.runtime.sendMessage({ 
+              action: "SCRAPE_GROUP",
+              groupName: groupName
+            }, (fallbackRes) => {
+              setIsScraping(false);
+              if (fallbackRes && fallbackRes.success) {
+                const newContacts: Contact[] = fallbackRes.data.map((c: any, idx: number) => ({
+                  id: crypto.randomUUID(),
+                  sr_no: (contacts.length + idx + 1).toString(),
+                  name: c.name || "Unknown",
+                  phone: c.phone || "",
+                  message_template: settings.defaultTemplate,
+                  status: 'pending'
+                }));
+                setContacts([...contacts, ...newContacts]);
+                toast.success(`Scraped ${newContacts.length} members from ${groupName} (UI Scrape)`);
+              } else {
+                toast.error(fallbackRes?.error || "Failed to scrape group. Make sure the group is open.");
+              }
+            });
+          }
+        });
       });
     }
   };
@@ -830,11 +879,13 @@ export default function App() {
                             <TableCell className="font-medium">{group.subject}</TableCell>
                             <TableCell className="text-right">
                               <Button 
-                                variant="ghost" 
+                                variant="outline" 
                                 size="sm" 
                                 onClick={() => scrapeGroupMembers(group.id, group.subject)}
-                                className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                disabled={isScraping}
+                                className="text-blue-600 border-blue-200 hover:bg-blue-50"
                               >
+                                <Users className="w-3 h-3 mr-1" />
                                 Scrape Members
                               </Button>
                             </TableCell>
@@ -868,6 +919,27 @@ export default function App() {
                   </Button>
                   <Button variant="outline" onClick={() => fetchContactsFromSidebar('unread_chats')} disabled={isScraping}>
                     Unread Chats
+                  </Button>
+                  <Button variant="outline" onClick={() => fetchContactsFromSidebar('group')} disabled={isScraping}>
+                    All Groups
+                  </Button>
+                  <Button variant="outline" onClick={() => {
+                    if (typeof chrome !== 'undefined' && chrome.runtime) {
+                      setIsScraping(true);
+                      withConnection(() => {
+                        chrome.runtime.sendMessage({ action: "GET_CHAT_SNAPSHOT" }, (response) => {
+                          setIsScraping(false);
+                          if (response && response.success) {
+                            toast.success("Chat snapshot captured");
+                            // You might want to do something with the snapshot data here
+                          } else {
+                            toast.error(response?.error || "Failed to get chat snapshot");
+                          }
+                        });
+                      });
+                    }
+                  }} disabled={isScraping}>
+                    Chat Snapshot
                   </Button>
                 </div>
                 <p className="text-xs text-slate-500">

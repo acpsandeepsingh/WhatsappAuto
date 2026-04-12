@@ -19,6 +19,27 @@ let settings = {
   useSmartWait: true
 };
 
+async function ensureTabConnection(tabId) {
+  try {
+    await chrome.tabs.sendMessage(tabId, { action: "PING" });
+    return true;
+  } catch (e) {
+    console.log("[BG] Content script not responding, attempting re-injection...");
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["content.js", "whatsapp-content.js"]
+    });
+    // Wait a bit for scripts to initialize
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    try {
+      await chrome.tabs.sendMessage(tabId, { action: "PING" });
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+}
+
 /**
  * Main message listener for the background script.
  * Handles queue control (start, pause, resume, stop) and status requests.
@@ -50,7 +71,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ status: "stopped" });
   } else if (request.action === "get_status") {
     sendResponse({ status, currentIndex, total: queue.length });
-  } else if (["GET_GROUPS", "FETCH_CONTACTS", "SCRAPE_GROUP", "GET_CHAT_SNAPSHOT", "STOP_CONTACT_FETCH"].includes(request.action)) {
+  } else if (request.action === "CHECK_CONNECTION") {
+    (async () => {
+      try {
+        const tabs = await chrome.tabs.query({ url: "https://web.whatsapp.com/*" });
+        if (tabs.length === 0) {
+          sendResponse({ success: false, error: "WhatsApp Web tab not found" });
+          return;
+        }
+        const connected = await ensureTabConnection(tabs[0].id);
+        if (connected) {
+          sendResponse({ success: true });
+        } else {
+          sendResponse({ success: false, error: "Failed to connect to WhatsApp. Please refresh the WhatsApp tab." });
+        }
+      } catch (e) {
+        sendResponse({ success: false, error: e.message });
+      }
+    })();
+    return true;
+  } else if (["GET_GROUPS", "FETCH_CONTACTS", "SCRAPE_GROUP", "GET_CHAT_SNAPSHOT", "STOP_CONTACT_FETCH", "SEND_MESSAGE"].includes(request.action)) {
     // Proxy these actions to the WhatsApp tab
     (async () => {
       try {
@@ -59,7 +99,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           sendResponse({ success: false, error: "WhatsApp Web tab not found" });
           return;
         }
-        const response = await chrome.tabs.sendMessage(tabs[0].id, request);
+        const tabId = tabs[0].id;
+        const connected = await ensureTabConnection(tabId);
+        if (!connected) {
+          sendResponse({ success: false, error: "Failed to connect to WhatsApp. Please refresh the WhatsApp tab." });
+          return;
+        }
+        const response = await chrome.tabs.sendMessage(tabId, request);
         sendResponse(response);
       } catch (e) {
         sendResponse({ success: false, error: e.message });
@@ -123,11 +169,15 @@ async function processNext() {
   const tabId = tabs[0].id;
 
   try {
-    console.log(`[BG] Sending process_row to tab ${tabId}`);
+    console.log(`[BG] Sending SEND_MESSAGE to tab ${tabId}`);
     const result = await chrome.tabs.sendMessage(tabId, {
-      action: "process_row",
-      data: contact,
-      settings: settings
+      action: "SEND_MESSAGE",
+      data: {
+        srNo: contact.sr_no,
+        phone: contact.phone,
+        message: contact.message,
+        rawRow: contact
+      }
     });
 
     if (result && result.success) {
