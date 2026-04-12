@@ -1,199 +1,115 @@
+/**
+ * WhatsApp Popup Script
+ * Handles UI interactions and triggers automation.
+ */
+
 document.addEventListener('DOMContentLoaded', () => {
+  const startBtn = document.getElementById('start-btn');
+  const stopBtn = document.getElementById('stop-btn');
   const statusText = document.getElementById('status-text');
   const progressText = document.getElementById('progress-text');
   const progressFill = document.getElementById('progress-fill');
-  const startBtn = document.getElementById('start-btn');
-  const stopBtn = document.getElementById('stop-btn');
-
-  console.log("[Popup] DOM loaded, initializing...");
-
-  const isExtension = typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage;
-
-  if (!isExtension) {
-    console.warn("[Popup] Not running as an extension. Buttons will be disabled.");
-    if (statusText) statusText.textContent = "Offline (Not Extension)";
-    if (startBtn) startBtn.disabled = true;
-    if (stopBtn) stopBtn.disabled = true;
-  }
-
-  function updateUI() {
-    if (!isExtension) return;
-
-    chrome.runtime.sendMessage({ action: "get_status" }, (response) => {
-      if (chrome.runtime.lastError) {
-        console.warn("[Popup] Background script not responding:", chrome.runtime.lastError.message);
-        if (statusText) statusText.textContent = "Error: BG Offline";
-        return;
-      }
-      
-      if (!response) {
-        console.warn("[Popup] No response from background script");
-        return;
-      }
-
-      const { status, currentIndex, total } = response;
-      console.log(`[Popup] Status: ${status}, Progress: ${currentIndex}/${total}`);
-      
-      // Update Status Badge
-      if (statusText) {
-        statusText.textContent = status.charAt(0).toUpperCase() + status.slice(1);
-        statusText.className = `badge badge-${status}`;
-      }
-
-      // Update Progress
-      const current = currentIndex === -1 ? 0 : currentIndex;
-      if (progressText) progressText.textContent = `${current} / ${total}`;
-      
-      const percent = total > 0 ? (current / total) * 100 : 0;
-      if (progressFill) progressFill.style.width = `${percent}%`;
-
-      // Update Buttons
-      if (status === 'running') {
-        if (startBtn) {
-          startBtn.disabled = true;
-          startBtn.textContent = 'Running...';
-        }
-        if (stopBtn) stopBtn.disabled = false;
-      } else if (status === 'paused') {
-        if (startBtn) {
-          startBtn.disabled = false;
-          startBtn.textContent = 'Resume';
-        }
-        if (stopBtn) stopBtn.disabled = false;
-      } else {
-        if (startBtn) {
-          startBtn.disabled = false;
-          startBtn.textContent = 'Start';
-        }
-        if (stopBtn) stopBtn.disabled = true;
-      }
-    });
-  }
-
-  function ensureConnection(callback) {
-    chrome.runtime.sendMessage({ action: "CHECK_CONNECTION" }, (res) => {
-      if (res && res.success) {
-        callback();
-      } else {
-        alert("Error: " + (res?.error || "Could not connect to WhatsApp. Make sure it's open and loaded."));
-      }
-    });
-  }
-
-  if (startBtn) {
-    startBtn.addEventListener('click', () => {
-      if (!isExtension) return;
-      console.log("[Popup] Start/Resume clicked");
-      
-      ensureConnection(() => {
-        chrome.runtime.sendMessage({ action: "get_status" }, (statusRes) => {
-          if (statusRes && statusRes.status === 'paused') {
-            console.log("[Popup] Sending resume_queue");
-            chrome.runtime.sendMessage({ action: "resume_queue" }, () => updateUI());
-          } else {
-            console.log("[Popup] Starting new queue from storage");
-            chrome.storage.local.get(['contacts', 'settings'], (data) => {
-              if (data.contacts && data.contacts.length > 0) {
-                console.log(`[Popup] Sending ${data.contacts.length} contacts to background`);
-                chrome.runtime.sendMessage({ 
-                  action: "start_queue", 
-                  contacts: data.contacts, 
-                  settings: data.settings 
-                }, (res) => {
-                  console.log("[Popup] Start response:", res);
-                  updateUI();
-                });
-              } else {
-                alert("Please add contacts in the dashboard first!");
-                chrome.runtime.openOptionsPage();
-              }
-            });
-          }
-        });
-      });
-    });
-  }
-
-  if (stopBtn) {
-    stopBtn.addEventListener('click', () => {
-      if (!isExtension) return;
-      console.log("[Popup] Stop clicked");
-      chrome.runtime.sendMessage({ action: "stop_queue" }, (res) => {
-        console.log("[Popup] Stop response:", res);
-        updateUI();
-      });
-    });
-  }
-
   const scrapeSidebarBtn = document.getElementById('scrape-sidebar-btn');
   const scrapeGroupBtn = document.getElementById('scrape-group-btn');
-
-  if (scrapeSidebarBtn) {
-    scrapeSidebarBtn.addEventListener('click', () => {
-      if (!isExtension) return;
-      
-      ensureConnection(() => {
-        scrapeSidebarBtn.disabled = true;
-        scrapeSidebarBtn.textContent = 'Scraping...';
-        
-        chrome.runtime.sendMessage({ action: "FETCH_CONTACTS", type: 'all_contacts' }, (res) => {
-          scrapeSidebarBtn.disabled = false;
-          scrapeSidebarBtn.textContent = 'Scrape Sidebar Contacts';
-          
-          if (res && res.success) {
-            alert(`Successfully scraped ${res.contacts.length} contacts! They are now in your dashboard.`);
-          } else {
-            alert("Error: " + (res?.error || "Could not connect to WhatsApp. Make sure it's open and loaded."));
-          }
-        });
-      });
-    });
-  }
-
-  if (scrapeGroupBtn) {
-    scrapeGroupBtn.addEventListener('click', () => {
-      if (!isExtension) return;
-      
-      ensureConnection(() => {
-        scrapeGroupBtn.disabled = true;
-        scrapeGroupBtn.textContent = 'Scraping...';
-        
-        chrome.runtime.sendMessage({ action: "SCRAPE_GROUP" }, (res) => {
-          scrapeGroupBtn.disabled = false;
-          scrapeGroupBtn.textContent = 'Scrape Open Group Members';
-          
-          if (res && res.success) {
-            alert(`Successfully scraped ${res.contacts.length} members! They are now in your dashboard.`);
-          } else {
-            alert("Error: " + (res?.error || "Could not connect to WhatsApp. Make sure a group is open and members list is visible."));
-          }
-        });
-      });
-    });
-  }
-
   const openDashboardBtn = document.getElementById('open-dashboard');
-  if (openDashboardBtn) {
-    openDashboardBtn.addEventListener('click', () => {
-      if (isExtension) {
-        chrome.runtime.openOptionsPage();
-      } else {
-        window.location.href = 'index.html';
+  const waLink = document.getElementById('wa-link');
+
+  // Initial status check
+  chrome.runtime.sendMessage({ action: "get_status" }, (response) => {
+    if (response) updateUI(response);
+  });
+
+  // Start Automation
+  startBtn.addEventListener('click', async () => {
+    // In a real scenario, we'd get contacts from storage or an input
+    // For this implementation, we'll try to get some from the dashboard or storage
+    const stored = await chrome.storage.local.get(['pendingContacts', 'automationSettings']);
+    const contacts = stored.pendingContacts || [];
+    
+    if (contacts.length === 0) {
+      alert("No contacts found. Please import contacts in the dashboard first.");
+      return;
+    }
+
+    chrome.runtime.sendMessage({
+      action: "start_queue",
+      contacts: contacts,
+      settings: stored.automationSettings || {}
+    }, (response) => {
+      if (response.success) {
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
       }
     });
-  }
+  });
 
-  const waLink = document.getElementById('wa-link');
-  if (waLink) {
-    waLink.addEventListener('click', (e) => {
-      e.preventDefault();
-      window.open('https://web.whatsapp.com', '_blank');
+  // Stop Automation
+  stopBtn.addEventListener('click', () => {
+    chrome.runtime.sendMessage({ action: "stop_queue" }, (response) => {
+      if (response.success) {
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+      }
     });
-  }
+  });
 
-  // Initial check and start polling
-  if (isExtension) {
-    updateUI();
-    setInterval(updateUI, 1000);
+  // Scrape Tools
+  scrapeSidebarBtn.addEventListener('click', async () => {
+    const tabs = await chrome.tabs.query({ url: "https://web.whatsapp.com/*" });
+    if (tabs.length === 0) return alert("WhatsApp tab not found");
+    
+    chrome.tabs.sendMessage(tabs[0].id, { action: "SCRAPE_GROUPS" }, (response) => {
+      if (response && response.success) {
+        console.log("Scraped contacts:", response.data);
+        alert(`Scraped ${response.data.length} contacts. Check console for details.`);
+      }
+    });
+  });
+
+  // Open Dashboard
+  openDashboardBtn.addEventListener('click', () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
+  });
+
+  // Open WhatsApp
+  waLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: "https://web.whatsapp.com" });
+  });
+
+  // Listen for status updates from background
+  chrome.runtime.onMessage.addListener((request) => {
+    if (request.action === "status_update") {
+      updateUI(request);
+    }
+  });
+
+  function updateUI(data) {
+    const { status, currentIndex, total, finished, error } = data;
+
+    statusText.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+    statusText.className = `badge badge-${status}`;
+    
+    const current = currentIndex === -1 ? 0 : currentIndex;
+    progressText.textContent = `${current} / ${total}`;
+    
+    const percentage = total > 0 ? (current / total) * 100 : 0;
+    progressFill.style.width = `${percentage}%`;
+
+    if (status === "running") {
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+    } else {
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+
+    if (finished) {
+      alert("Automation finished successfully!");
+    }
+
+    if (error) {
+      console.error("Automation error:", error);
+    }
   }
 });
