@@ -73,6 +73,11 @@ interface AppSettings {
   randomDelay: boolean;
   maxRetries: number;
   defaultTemplate: string;
+  searchDelay: number;
+  openChatDelay: number;
+  pasteDelay: number;
+  sendDelay: number;
+  useSmartWait: boolean;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -80,7 +85,12 @@ const DEFAULT_SETTINGS: AppSettings = {
   maxDelay: 10000,
   randomDelay: true,
   maxRetries: 3,
-  defaultTemplate: "Hello {{name}}, this is a message for you."
+  defaultTemplate: "Hello {{name}}, this is a message for you.",
+  searchDelay: 3000,
+  openChatDelay: 4000,
+  pasteDelay: 4000,
+  sendDelay: 2000,
+  useSmartWait: true
 };
 
 export default function App() {
@@ -583,51 +593,114 @@ export default function App() {
                 </Button>
               </div>
             </CardHeader>
-            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-4">
-                <div className="grid gap-2">
-                  <Label>Min Delay (ms)</Label>
-                  <Input 
-                    type="number" 
-                    value={settings.minDelay} 
-                    onChange={(e) => setSettings({...settings, minDelay: parseInt(e.target.value)})}
-                  />
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <div className="grid gap-2">
+                    <Label className="text-xs font-bold text-slate-500">Contact Interval (ms)</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-[10px]">Min</Label>
+                        <Input 
+                          type="number" 
+                          value={settings.minDelay} 
+                          onChange={(e) => setSettings({...settings, minDelay: parseInt(e.target.value)})}
+                          className="h-8"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px]">Max</Label>
+                        <Input 
+                          type="number" 
+                          value={settings.maxDelay} 
+                          onChange={(e) => setSettings({...settings, maxDelay: parseInt(e.target.value)})}
+                          className="h-8"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="checkbox" 
+                      id="randomDelay"
+                      checked={settings.randomDelay}
+                      onChange={(e) => setSettings({...settings, randomDelay: e.target.checked})}
+                    />
+                    <Label htmlFor="randomDelay" className="text-sm">Randomize Interval</Label>
+                  </div>
+                  <div className="flex items-center gap-2 p-2 bg-slate-50 rounded border border-slate-100">
+                    <input 
+                      type="checkbox" 
+                      id="useSmartWait"
+                      checked={settings.useSmartWait}
+                      onChange={(e) => setSettings({...settings, useSmartWait: e.target.checked})}
+                    />
+                    <div className="space-y-0.5">
+                      <Label htmlFor="useSmartWait" className="text-sm font-bold">Smart Wait (Recommended)</Label>
+                      <p className="text-[10px] text-slate-500 leading-tight">Proceed immediately when elements appear instead of fixed delays.</p>
+                    </div>
+                  </div>
                 </div>
-                <div className="grid gap-2">
-                  <Label>Max Delay (ms)</Label>
-                  <Input 
-                    type="number" 
-                    value={settings.maxDelay} 
-                    onChange={(e) => setSettings({...settings, maxDelay: parseInt(e.target.value)})}
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <input 
-                    type="checkbox" 
-                    id="randomDelay"
-                    checked={settings.randomDelay}
-                    onChange={(e) => setSettings({...settings, randomDelay: e.target.checked})}
-                  />
-                  <Label htmlFor="randomDelay">Randomize Delay</Label>
+
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <Label className="text-[10px] font-bold text-slate-500 uppercase">Search Delay (ms)</Label>
+                      <Input 
+                        type="number" 
+                        value={settings.searchDelay} 
+                        onChange={(e) => setSettings({...settings, searchDelay: parseInt(e.target.value)})}
+                        className="h-8"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] font-bold text-slate-500 uppercase">Open Chat Delay (ms)</Label>
+                      <Input 
+                        type="number" 
+                        value={settings.openChatDelay} 
+                        onChange={(e) => setSettings({...settings, openChatDelay: parseInt(e.target.value)})}
+                        className="h-8"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] font-bold text-slate-500 uppercase">Paste Delay (ms)</Label>
+                      <Input 
+                        type="number" 
+                        value={settings.pasteDelay} 
+                        onChange={(e) => setSettings({...settings, pasteDelay: parseInt(e.target.value)})}
+                        className="h-8"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] font-bold text-slate-500 uppercase">Send Delay (ms)</Label>
+                      <Input 
+                        type="number" 
+                        value={settings.sendDelay} 
+                        onChange={(e) => setSettings({...settings, sendDelay: parseInt(e.target.value)})}
+                        className="h-8"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label className="text-xs font-bold text-slate-500">Max Retries</Label>
+                    <Input 
+                      type="number" 
+                      value={settings.maxRetries} 
+                      onChange={(e) => setSettings({...settings, maxRetries: parseInt(e.target.value)})}
+                      className="h-8"
+                    />
+                  </div>
                 </div>
               </div>
-              <div className="space-y-4">
-                <div className="grid gap-2">
-                  <Label>Max Retries</Label>
-                  <Input 
-                    type="number" 
-                    value={settings.maxRetries} 
-                    onChange={(e) => setSettings({...settings, maxRetries: parseInt(e.target.value)})}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Default Template</Label>
-                  <Textarea 
-                    value={settings.defaultTemplate} 
-                    onChange={(e) => setSettings({...settings, defaultTemplate: e.target.value})}
-                    className="text-xs"
-                  />
-                </div>
+              
+              <div className="grid gap-2 pt-4 border-t">
+                <Label className="text-xs font-bold text-slate-500">Default Message Template</Label>
+                <Textarea 
+                  value={settings.defaultTemplate} 
+                  onChange={(e) => setSettings({...settings, defaultTemplate: e.target.value})}
+                  className="text-xs min-h-[80px]"
+                  placeholder="Hello {{name}}..."
+                />
               </div>
             </CardContent>
           </Card>

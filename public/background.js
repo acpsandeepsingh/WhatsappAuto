@@ -8,7 +8,12 @@ let settings = {
   minDelay: 3000,
   maxDelay: 10000,
   randomDelay: true,
-  maxRetries: 3
+  maxRetries: 3,
+  searchDelay: 3000,
+  openChatDelay: 4000,
+  pasteDelay: 4000,
+  sendDelay: 2000,
+  useSmartWait: true
 };
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -88,7 +93,8 @@ async function processNext() {
     console.log(`[BG] Sending process_row to tab ${tabId}`);
     const result = await chrome.tabs.sendMessage(tabId, {
       action: "process_row",
-      data: contact
+      data: contact,
+      settings: settings
     });
 
     if (result && result.success) {
