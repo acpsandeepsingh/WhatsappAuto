@@ -67,6 +67,11 @@ interface Contact {
   error?: string;
 }
 
+interface Group {
+  id: string;
+  subject: string;
+}
+
 interface AppSettings {
   minDelay: number;
   maxDelay: number;
@@ -78,6 +83,7 @@ interface AppSettings {
   pasteDelay: number;
   sendDelay: number;
   useSmartWait: boolean;
+  autoStartTime?: string; // ISO string or empty
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -90,7 +96,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   openChatDelay: 4000,
   pasteDelay: 4000,
   sendDelay: 2000,
-  useSmartWait: true
+  useSmartWait: true,
+  autoStartTime: ""
 };
 
 /**
@@ -99,7 +106,11 @@ const DEFAULT_SETTINGS: AppSettings = {
  */
 export default function App() {
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeTab, setActiveTab] = useState<'contacts' | 'groups' | 'scraping'>('contacts');
+  const [isScraping, setIsScraping] = useState(false);
   const [queueStatus, setQueueStatus] = useState<'idle' | 'running' | 'paused' | 'stopped'>('idle');
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
@@ -110,14 +121,18 @@ export default function App() {
   useEffect(() => {
     const loadData = async () => {
       if (typeof chrome !== 'undefined' && chrome.storage) {
-        const result = await chrome.storage.local.get(['contacts', 'settings']);
+        const result = await chrome.storage.local.get(['contacts', 'settings', 'groups', 'selectedGroups']);
         if (result.contacts) setContacts(result.contacts);
         if (result.settings) setSettings(result.settings);
+        if (result.groups) setGroups(result.groups);
+        if (result.selectedGroups) setSelectedGroups(result.selectedGroups);
       } else {
         const savedContacts = localStorage.getItem('contacts');
         const savedSettings = localStorage.getItem('settings');
+        const savedGroups = localStorage.getItem('groups');
         if (savedContacts) setContacts(JSON.parse(savedContacts));
         if (savedSettings) setSettings(JSON.parse(savedSettings));
+        if (savedGroups) setGroups(JSON.parse(savedGroups));
       }
     };
     loadData();
@@ -162,12 +177,34 @@ export default function App() {
   // Save state
   useEffect(() => {
     if (typeof chrome !== 'undefined' && chrome.storage) {
-      chrome.storage.local.set({ contacts, settings });
+      chrome.storage.local.set({ contacts, settings, groups, selectedGroups });
     } else {
       localStorage.setItem('contacts', JSON.stringify(contacts));
       localStorage.setItem('settings', JSON.stringify(settings));
+      localStorage.setItem('groups', JSON.stringify(groups));
+      localStorage.setItem('selectedGroups', JSON.stringify(selectedGroups));
     }
-  }, [contacts, settings]);
+  }, [contacts, settings, groups, selectedGroups]);
+
+  // Auto-start logic
+  useEffect(() => {
+    if (!settings.autoStartTime || queueStatus !== 'idle') return;
+
+    const timer = setInterval(() => {
+      const now = new Date();
+      const scheduledTime = new Date(settings.autoStartTime!);
+      
+      if (now >= scheduledTime) {
+        console.log("[App] Auto-start triggered");
+        startQueue();
+        // Clear the auto-start time after triggering to prevent repeated starts
+        setSettings(prev => ({ ...prev, autoStartTime: "" }));
+        clearInterval(timer);
+      }
+    }, 10000); // Check every 10 seconds
+
+    return () => clearInterval(timer);
+  }, [settings.autoStartTime, queueStatus, contacts]);
 
   const filteredContacts = useMemo(() => {
     return contacts.filter(c => 
@@ -249,6 +286,124 @@ export default function App() {
       .replace(/{{name}}/g, contact.name)
       .replace(/{{mobile}}/g, contact.phone)
       .replace(/{{sr_no}}/g, contact.sr_no);
+  };
+
+  const fetchGroups = () => {
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
+      setIsScraping(true);
+      chrome.runtime.sendMessage({ action: "GET_GROUPS" }, (response) => {
+        setIsScraping(false);
+        if (response && response.success) {
+          setGroups(response.groups);
+          toast.success(`Loaded ${response.groups.length} groups`);
+        } else {
+          toast.error(response?.error || "Failed to load groups");
+        }
+      });
+    }
+  };
+
+  const fetchContactsFromSidebar = (filterType: string = 'all_contacts') => {
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
+      setIsScraping(true);
+      chrome.runtime.sendMessage({ 
+        action: "FETCH_CONTACTS",
+        filter: { primary: filterType }
+      }, (response) => {
+        setIsScraping(false);
+        if (response && response.success) {
+          const newContacts: Contact[] = response.data.map((c: any, idx: number) => ({
+            id: crypto.randomUUID(),
+            sr_no: (contacts.length + idx + 1).toString(),
+            name: c.name || "Unknown",
+            phone: c.phone || "",
+            message_template: settings.defaultTemplate,
+            status: 'pending'
+          }));
+          setContacts([...contacts, ...newContacts]);
+          toast.success(`Fetched ${newContacts.length} contacts from sidebar`);
+        } else {
+          toast.error(response?.error || "Failed to fetch contacts");
+        }
+      });
+    }
+  };
+
+  const scrapeGroupMembers = (groupId: string, groupName: string) => {
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
+      setIsScraping(true);
+      chrome.runtime.sendMessage({ 
+        action: "SCRAPE_GROUP",
+        groupName: groupName
+      }, (response) => {
+        setIsScraping(false);
+        if (response && response.success) {
+          const newContacts: Contact[] = response.data.map((c: any, idx: number) => ({
+            id: crypto.randomUUID(),
+            sr_no: (contacts.length + idx + 1).toString(),
+            name: c.name || "Unknown",
+            phone: c.phone || "",
+            message_template: settings.defaultTemplate,
+            status: 'pending'
+          }));
+          setContacts([...contacts, ...newContacts]);
+          toast.success(`Scraped ${newContacts.length} members from ${groupName}`);
+        } else {
+          toast.error(response?.error || "Failed to scrape group. Make sure the group is open and 'View All' is visible.");
+        }
+      });
+    }
+  };
+
+  const startGroupCampaign = () => {
+    if (selectedGroups.length === 0) {
+      toast.error("Please select at least one group");
+      return;
+    }
+
+    const groupContacts: Contact[] = selectedGroups.map((groupId, idx) => {
+      const group = groups.find(g => g.id === groupId);
+      return {
+        id: crypto.randomUUID(),
+        sr_no: (contacts.length + idx + 1).toString(),
+        name: group?.subject || "Unknown Group",
+        phone: group?.subject || "", // For groups, we search by name
+        message_template: settings.defaultTemplate,
+        status: 'pending'
+      };
+    });
+
+    const preparedContacts = groupContacts.map(c => ({
+      ...c,
+      message: parseTemplate(c.message_template, c)
+    }));
+
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
+      chrome.runtime.sendMessage({ 
+        action: "start_queue", 
+        contacts: preparedContacts,
+        settings
+      }, (response) => {
+        setQueueStatus('running');
+        toast.success("Group campaign started");
+      });
+    }
+  };
+
+  const toggleGroupSelection = (groupId: string) => {
+    setSelectedGroups(prev => 
+      prev.includes(groupId) 
+        ? prev.filter(id => id !== groupId) 
+        : [...prev, groupId]
+    );
+  };
+
+  const selectAllGroups = () => {
+    if (selectedGroups.length === groups.length) {
+      setSelectedGroups([]);
+    } else {
+      setSelectedGroups(groups.map(g => g.id));
+    }
   };
 
   /**
@@ -409,185 +564,344 @@ export default function App() {
           </div>
         </header>
 
-        {/* Progress & Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card className="border-none shadow-sm">
-            <CardHeader className="pb-2">
-              <CardDescription className="text-xs uppercase font-bold text-slate-400">Total</CardDescription>
-              <CardTitle className="text-2xl">{contacts.length}</CardTitle>
-            </CardHeader>
-          </Card>
-          <Card className="border-none shadow-sm">
-            <CardHeader className="pb-2">
-              <CardDescription className="text-xs uppercase font-bold text-slate-400">Sent</CardDescription>
-              <CardTitle className="text-2xl text-green-600">
-                {contacts.filter(c => c.status === 'sent').length}
-              </CardTitle>
-            </CardHeader>
-          </Card>
-          <Card className="border-none shadow-sm">
-            <CardHeader className="pb-2">
-              <CardDescription className="text-xs uppercase font-bold text-slate-400">Pending</CardDescription>
-              <CardTitle className="text-2xl text-amber-500">
-                {contacts.filter(c => c.status === 'pending').length}
-              </CardTitle>
-            </CardHeader>
-          </Card>
-          <Card className="border-none shadow-sm">
-            <CardHeader className="pb-2">
-              <CardDescription className="text-xs uppercase font-bold text-slate-400">Status</CardDescription>
-              <CardTitle className="text-2xl flex items-center gap-2">
-                {queueStatus === 'running' && <RefreshCw className="w-5 h-5 animate-spin text-green-600" />}
-                <span className="capitalize">{queueStatus}</span>
-              </CardTitle>
-            </CardHeader>
-          </Card>
+        {/* Tabs */}
+        <div className="flex border-b border-slate-200">
+          <button 
+            onClick={() => setActiveTab('contacts')}
+            className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'contacts' ? 'border-green-600 text-green-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+          >
+            Contacts Queue
+          </button>
+          <button 
+            onClick={() => setActiveTab('groups')}
+            className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'groups' ? 'border-green-600 text-green-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+          >
+            Group Campaign
+          </button>
+          <button 
+            onClick={() => setActiveTab('scraping')}
+            className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'scraping' ? 'border-green-600 text-green-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+          >
+            Scraping Tools
+          </button>
         </div>
 
-        {/* Main Table Card */}
-        <Card className="border-none shadow-sm overflow-hidden">
-          <CardHeader className="bg-white border-b">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <CardTitle className="text-lg font-semibold">Message Queue</CardTitle>
-                <Button variant="ghost" size="sm" onClick={addRow} className="text-green-600 hover:text-green-700 hover:bg-green-50 gap-1">
-                  <Plus className="w-4 h-4" />
-                  Add Row
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => {
-                  setContacts(contacts.map(c => ({ ...c, status: 'pending', error: undefined })));
-                  toast.success("All statuses cleared");
-                }} className="text-slate-500 hover:text-slate-700 gap-1">
-                  <RefreshCw className="w-3 h-3" />
-                  Clear Status
-                </Button>
-              </div>
-              <div className="relative w-full md:w-80">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <Input 
-                  placeholder="Search by name or phone..." 
-                  className="pl-10" 
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
+        {activeTab === 'contacts' && (
+          <>
+            {/* Progress & Stats */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Card className="border-none shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs uppercase font-bold text-slate-400">Total</CardDescription>
+                  <CardTitle className="text-2xl">{contacts.length}</CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="border-none shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs uppercase font-bold text-slate-400">Sent</CardDescription>
+                  <CardTitle className="text-2xl text-green-600">
+                    {contacts.filter(c => c.status === 'sent').length}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="border-none shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs uppercase font-bold text-slate-400">Pending</CardDescription>
+                  <CardTitle className="text-2xl text-amber-500">
+                    {contacts.filter(c => c.status === 'pending').length}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="border-none shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs uppercase font-bold text-slate-400">Status</CardDescription>
+                  <CardTitle className="text-2xl flex items-center gap-2">
+                    {queueStatus === 'running' && <RefreshCw className="w-5 h-5 animate-spin text-green-600" />}
+                    <span className="capitalize">{queueStatus}</span>
+                  </CardTitle>
+                </CardHeader>
+              </Card>
             </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-slate-50/50">
-                    <TableHead className="w-16">Sr.</TableHead>
-                    <TableHead className="w-48">Name</TableHead>
-                    <TableHead className="w-48">Mobile Number</TableHead>
-                    <TableHead>Message Template</TableHead>
-                    <TableHead className="w-40">Attachment</TableHead>
-                    <TableHead className="w-32">Status</TableHead>
-                    <TableHead className="w-16"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <AnimatePresence mode="popLayout">
-                    {filteredContacts.map((contact, idx) => (
-                      <motion.tr
-                        key={contact.id}
-                        layout
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className={`group transition-colors ${currentIndex === idx ? 'bg-green-50/50' : 'hover:bg-slate-50/50'}`}
-                      >
-                        <TableCell className="font-mono text-xs text-slate-400">
-                          {contact.sr_no}
-                        </TableCell>
-                        <TableCell>
-                          <Input 
-                            value={contact.name} 
-                            onChange={(e) => updateContact(contact.id, 'name', e.target.value)}
-                            className="h-8 border-transparent hover:border-slate-200 focus:border-slate-300 bg-transparent"
-                            placeholder="Name"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Input 
-                              value={contact.phone} 
-                              onChange={(e) => updateContact(contact.id, 'phone', e.target.value)}
-                              className="h-8 border-transparent hover:border-slate-200 focus:border-slate-300 bg-transparent font-mono"
-                              placeholder="Phone"
-                            />
-                            {contact.phone.length >= 10 ? (
-                              <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />
-                            ) : (
-                              <AlertCircle className="w-4 h-4 text-slate-300 shrink-0" />
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Input 
-                            value={contact.message_template} 
-                            onChange={(e) => updateContact(contact.id, 'message_template', e.target.value)}
-                            className="h-8 border-transparent hover:border-slate-200 focus:border-slate-300 bg-transparent text-sm"
-                            placeholder="Message..."
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            {contact.attachment ? (
-                              <div className="flex items-center gap-1 text-xs bg-slate-100 px-2 py-1 rounded border">
-                                <FileText className="w-3 h-3 text-slate-400" />
-                                <span className="truncate max-w-[80px]">{contact.attachment.name}</span>
-                                <button onClick={() => updateContact(contact.id, 'attachment', undefined)}>
-                                  <X className="w-3 h-3 text-slate-400 hover:text-red-500" />
-                                </button>
-                              </div>
-                            ) : (
-                              <label className="cursor-pointer text-slate-400 hover:text-slate-600">
-                                <Paperclip className="w-4 h-4" />
-                                <input 
-                                  type="file" 
-                                  className="hidden" 
-                                  onChange={(e) => handleFileAttach(contact.id, e)}
-                                />
-                              </label>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col">
-                            <span className={`text-xs font-bold px-2 py-1 rounded-full uppercase tracking-wider w-fit ${
-                              contact.status === 'sent' ? 'bg-green-100 text-green-700' :
-                              contact.status === 'failed' ? 'bg-red-100 text-red-700' :
-                              'bg-slate-100 text-slate-600'
-                            }`}>
-                              {contact.status}
-                            </span>
-                            {contact.error && (
-                              <span className="text-[10px] text-red-500 mt-1 truncate max-w-[100px]" title={contact.error}>
-                                {contact.error}
-                              </span>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500"
-                            onClick={() => setContacts(contacts.filter(c => c.id !== contact.id))}
+
+            {/* Main Table Card */}
+            <Card className="border-none shadow-sm overflow-hidden">
+              <CardHeader className="bg-white border-b">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <CardTitle className="text-lg font-semibold">Message Queue</CardTitle>
+                    <Button variant="ghost" size="sm" onClick={addRow} className="text-green-600 hover:text-green-700 hover:bg-green-50 gap-1">
+                      <Plus className="w-4 h-4" />
+                      Add Row
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => {
+                      setContacts(contacts.map(c => ({ ...c, status: 'pending', error: undefined })));
+                      toast.success("All statuses cleared");
+                    }} className="text-slate-500 hover:text-slate-700 gap-1">
+                      <RefreshCw className="w-3 h-3" />
+                      Clear Status
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={clearContacts} className="text-red-500 hover:text-red-600 hover:bg-red-50 gap-1">
+                      <Trash2 className="w-3 h-3" />
+                      Clear All
+                    </Button>
+                  </div>
+                  <div className="relative w-full md:w-80">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <Input 
+                      placeholder="Search by name or phone..." 
+                      className="pl-10" 
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-slate-50/50">
+                        <TableHead className="w-16">Sr.</TableHead>
+                        <TableHead className="w-48">Name</TableHead>
+                        <TableHead className="w-48">Mobile Number</TableHead>
+                        <TableHead>Message Template</TableHead>
+                        <TableHead className="w-40">Attachment</TableHead>
+                        <TableHead className="w-32">Status</TableHead>
+                        <TableHead className="w-16"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <AnimatePresence mode="popLayout">
+                        {filteredContacts.map((contact, idx) => (
+                          <motion.tr
+                            key={contact.id}
+                            layout
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className={`group transition-colors ${currentIndex === idx ? 'bg-green-50/50' : 'hover:bg-slate-50/50'}`}
                           >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </TableCell>
-                      </motion.tr>
-                    ))}
-                  </AnimatePresence>
-                </TableBody>
-              </Table>
+                            <TableCell className="font-mono text-xs text-slate-400">
+                              {contact.sr_no}
+                            </TableCell>
+                            <TableCell>
+                              <Input 
+                                value={contact.name} 
+                                onChange={(e) => updateContact(contact.id, 'name', e.target.value)}
+                                className="h-8 border-transparent hover:border-slate-200 focus:border-slate-300 bg-transparent"
+                                placeholder="Name"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Input 
+                                  value={contact.phone} 
+                                  onChange={(e) => updateContact(contact.id, 'phone', e.target.value)}
+                                  className="h-8 border-transparent hover:border-slate-200 focus:border-slate-300 bg-transparent font-mono"
+                                  placeholder="Phone"
+                                />
+                                {contact.phone.length >= 10 ? (
+                                  <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />
+                                ) : (
+                                  <AlertCircle className="w-4 h-4 text-slate-300 shrink-0" />
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Input 
+                                value={contact.message_template} 
+                                onChange={(e) => updateContact(contact.id, 'message_template', e.target.value)}
+                                className="h-8 border-transparent hover:border-slate-200 focus:border-slate-300 bg-transparent text-sm"
+                                placeholder="Message..."
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                {contact.attachment ? (
+                                  <div className="flex items-center gap-1 text-xs bg-slate-100 px-2 py-1 rounded border">
+                                    <FileText className="w-3 h-3 text-slate-400" />
+                                    <span className="truncate max-w-[80px]">{contact.attachment.name}</span>
+                                    <button onClick={() => updateContact(contact.id, 'attachment', undefined)}>
+                                      <X className="w-3 h-3 text-slate-400 hover:text-red-500" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <label className="cursor-pointer text-slate-400 hover:text-slate-600">
+                                    <Paperclip className="w-4 h-4" />
+                                    <input 
+                                      type="file" 
+                                      className="hidden" 
+                                      onChange={(e) => handleFileAttach(contact.id, e)}
+                                    />
+                                  </label>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-col">
+                                <span className={`text-xs font-bold px-2 py-1 rounded-full uppercase tracking-wider w-fit ${
+                                  contact.status === 'sent' ? 'bg-green-100 text-green-700' :
+                                  contact.status === 'failed' ? 'bg-red-100 text-red-700' :
+                                  'bg-slate-100 text-slate-600'
+                                }`}>
+                                  {contact.status}
+                                </span>
+                                {contact.error && (
+                                  <span className="text-[10px] text-red-500 mt-1 truncate max-w-[100px]" title={contact.error}>
+                                    {contact.error}
+                                  </span>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500"
+                                onClick={() => setContacts(contacts.filter(c => c.id !== contact.id))}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </TableCell>
+                          </motion.tr>
+                        ))}
+                      </AnimatePresence>
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </>
+        )}
+
+        {activeTab === 'groups' && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold">Group Campaign</h2>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={fetchGroups} disabled={isScraping}>
+                  {isScraping ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+                  Refresh Groups
+                </Button>
+                <Button onClick={startGroupCampaign} className="bg-green-600 hover:bg-green-700 text-white">
+                  <Play className="w-4 h-4 mr-2" />
+                  Start Group Campaign
+                </Button>
+              </div>
             </div>
-          </CardContent>
-        </Card>
+
+            <Card className="border-none shadow-sm">
+              <CardHeader className="border-b">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg">Select Groups ({selectedGroups.length} selected)</CardTitle>
+                  <Button variant="ghost" size="sm" onClick={selectAllGroups}>
+                    {selectedGroups.length === groups.length ? "Deselect All" : "Select All"}
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="max-h-[400px] overflow-y-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12"></TableHead>
+                        <TableHead>Group Name</TableHead>
+                        <TableHead className="w-32 text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {groups.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={3} className="text-center py-8 text-slate-500">
+                            No groups found. Click "Refresh Groups" to load them.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        groups.map((group) => (
+                          <TableRow key={group.id} className="hover:bg-slate-50">
+                            <TableCell>
+                              <input 
+                                type="checkbox" 
+                                checked={selectedGroups.includes(group.id)}
+                                onChange={() => toggleGroupSelection(group.id)}
+                                className="w-4 h-4 rounded border-slate-300 text-green-600 focus:ring-green-500"
+                              />
+                            </TableCell>
+                            <TableCell className="font-medium">{group.subject}</TableCell>
+                            <TableCell className="text-right">
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                onClick={() => scrapeGroupMembers(group.id, group.subject)}
+                                className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                              >
+                                Scrape Members
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {activeTab === 'scraping' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card className="border-none shadow-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Search className="w-5 h-5 text-blue-600" />
+                  Sidebar Scraper
+                </CardTitle>
+                <CardDescription>
+                  Quickly extract all contacts currently visible in your WhatsApp sidebar.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-2">
+                  <Button variant="outline" onClick={() => fetchContactsFromSidebar('all_contacts')} disabled={isScraping}>
+                    All Contacts
+                  </Button>
+                  <Button variant="outline" onClick={() => fetchContactsFromSidebar('unread_chats')} disabled={isScraping}>
+                    Unread Chats
+                  </Button>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Note: This only scrapes what is currently loaded in the sidebar. Scroll down in WhatsApp to load more.
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-none shadow-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Plus className="w-5 h-5 text-green-600" />
+                  Manual Scraper
+                </CardTitle>
+                <CardDescription>
+                  Scrape members from the currently open group in WhatsApp.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <Button 
+                  className="w-full bg-green-600 hover:bg-green-700 text-white" 
+                  onClick={() => scrapeGroupMembers("", "")}
+                  disabled={isScraping}
+                >
+                  {isScraping ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
+                  Scrape Open Group
+                </Button>
+                <p className="text-xs text-slate-500">
+                  Open a group in WhatsApp, click the group name to see info, then click "View all" members before using this.
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
         {/* Settings & Help */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -608,10 +922,6 @@ export default function App() {
                 }} className="h-8 text-xs gap-1">
                   <RefreshCw className="w-3 h-3" />
                   Clear Status
-                </Button>
-                <Button variant="ghost" size="sm" onClick={clearContacts} className="h-8 text-xs gap-1 text-red-500 hover:text-red-600 hover:bg-red-50">
-                  <Trash2 className="w-3 h-3" />
-                  Clear All
                 </Button>
               </div>
             </CardHeader>
@@ -661,6 +971,20 @@ export default function App() {
                       <Label htmlFor="useSmartWait" className="text-sm font-bold">Smart Wait (Recommended)</Label>
                       <p className="text-[10px] text-slate-500 leading-tight">Proceed immediately when elements appear instead of fixed delays.</p>
                     </div>
+                  </div>
+                  
+                  <div className="grid gap-2 p-2 bg-blue-50 rounded border border-blue-100">
+                    <Label className="text-xs font-bold text-blue-700 flex items-center gap-1">
+                      <RefreshCw className="w-3 h-3" />
+                      Auto Start Time
+                    </Label>
+                    <Input 
+                      type="datetime-local" 
+                      value={settings.autoStartTime || ""} 
+                      onChange={(e) => setSettings({...settings, autoStartTime: e.target.value})}
+                      className="h-8 bg-white"
+                    />
+                    <p className="text-[10px] text-blue-600">Automation will start automatically at this time.</p>
                   </div>
                 </div>
 

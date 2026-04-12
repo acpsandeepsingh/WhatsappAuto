@@ -50,6 +50,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ status: "stopped" });
   } else if (request.action === "get_status") {
     sendResponse({ status, currentIndex, total: queue.length });
+  } else if (["GET_GROUPS", "FETCH_CONTACTS", "SCRAPE_GROUP", "GET_CHAT_SNAPSHOT", "STOP_CONTACT_FETCH"].includes(request.action)) {
+    // Proxy these actions to the WhatsApp tab
+    (async () => {
+      try {
+        const tabs = await chrome.tabs.query({ url: "https://web.whatsapp.com/*" });
+        if (tabs.length === 0) {
+          sendResponse({ success: false, error: "WhatsApp Web tab not found" });
+          return;
+        }
+        const response = await chrome.tabs.sendMessage(tabs[0].id, request);
+        sendResponse(response);
+      } catch (e) {
+        sendResponse({ success: false, error: e.message });
+      }
+    })();
+    return true; // Keep channel open for async response
   }
   return true;
 });

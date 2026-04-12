@@ -1,5 +1,5 @@
 // content.js
-console.log("WhatsApp Automation: Content Script Loaded");
+console.log("WhatsApp Automation: Legacy Content Script Loaded");
 
 /**
  * Utility to pause execution for a specified duration.
