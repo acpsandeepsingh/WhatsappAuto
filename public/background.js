@@ -1,6 +1,9 @@
 // background.js
 console.log("WhatsApp Automation: Background Script Initialized");
 
+/**
+ * State and configuration for the background automation engine.
+ */
 let queue = [];
 let currentIndex = -1;
 let status = "idle"; // idle, running, paused, stopped
@@ -16,6 +19,10 @@ let settings = {
   useSmartWait: true
 };
 
+/**
+ * Main message listener for the background script.
+ * Handles queue control (start, pause, resume, stop) and status requests.
+ */
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log(`[BG] Received action: ${request.action}`);
   
@@ -47,6 +54,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true;
 });
 
+/**
+ * Replaces placeholders in a message template with contact-specific data.
+ * @param {string} template - The message template (e.g., "Hello {{name}}").
+ * @param {Object} contact - The contact data object.
+ * @returns {string} - The populated message.
+ */
 function parseTemplate(template, contact) {
   if (!template) return "";
   return template
@@ -55,6 +68,10 @@ function parseTemplate(template, contact) {
     .replace(/{{sr_no}}/g, contact.sr_no || "");
 }
 
+/**
+ * The core automation loop. Processes the next contact in the queue.
+ * Manages delays, retries, and communication with the WhatsApp Web tab.
+ */
 async function processNext() {
   if (status !== "running") {
     console.log(`[BG] processNext aborted: status is ${status}`);
@@ -136,6 +153,10 @@ async function processNext() {
   }
 }
 
+/**
+ * Sends a status update to the dashboard/popup UI.
+ * @param {Object} extra - Additional data to include in the update (e.g., error messages).
+ */
 function updateUI(extra = {}) {
   chrome.runtime.sendMessage({
     action: "status_update",

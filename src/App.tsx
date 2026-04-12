@@ -93,6 +93,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   useSmartWait: true
 };
 
+/**
+ * Main Dashboard Component for WhatsApp Automation.
+ * Handles contact management, automation control, and settings.
+ */
 export default function App() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -172,6 +176,9 @@ export default function App() {
     );
   }, [contacts, searchTerm]);
 
+  /**
+   * Handles CSV/XLS file import and parses it into the contact list.
+   */
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -199,6 +206,9 @@ export default function App() {
     reader.readAsBinaryString(file);
   };
 
+  /**
+   * Adds a new empty row to the contact list.
+   */
   const addRow = () => {
     const newContact: Contact = {
       id: crypto.randomUUID(),
@@ -211,10 +221,16 @@ export default function App() {
     setContacts([...contacts, newContact]);
   };
 
+  /**
+   * Updates a specific field for a contact.
+   */
   const updateContact = (id: string, field: keyof Contact, value: any) => {
     setContacts(contacts.map(c => c.id === id ? { ...c, [field]: value } : c));
   };
 
+  /**
+   * Handles file attachment for a specific contact.
+   */
   const handleFileAttach = (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -235,6 +251,9 @@ export default function App() {
       .replace(/{{sr_no}}/g, contact.sr_no);
   };
 
+  /**
+   * Starts the automation queue by sending contacts to the background script.
+   */
   const startQueue = () => {
     const pendingContacts = contacts.filter(c => c.status !== 'sent');
     
@@ -287,6 +306,9 @@ export default function App() {
     }
   };
 
+  /**
+   * Downloads the current contact list as a CSV file.
+   */
   const downloadCSV = () => {
     if (contacts.length === 0) {
       toast.error("No data to download");
@@ -333,7 +355,7 @@ export default function App() {
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
               <MessageSquare className="w-8 h-8 text-green-600" />
-              WhatsApp Automation Pro
+              WhatsApp Automation
             </h1>
             <p className="text-slate-500 mt-1">Professional bulk messaging with DOM-based automation.</p>
           </div>
