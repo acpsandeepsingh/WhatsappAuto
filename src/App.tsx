@@ -354,7 +354,7 @@ export default function App() {
     }
   };
 
-  const scrapeGroupMembers = (groupId: string, groupName: string) => {
+  const scrapeGroupMembers = (groupId: string, groupName: string, autoDownload: boolean = false) => {
     if (typeof chrome !== 'undefined' && chrome.runtime) {
       setIsScraping(true);
       withConnection(() => {
@@ -365,16 +365,23 @@ export default function App() {
         }, (response) => {
           setIsScraping(false);
           if (response && response.success) {
-            const newContacts: Contact[] = response.data.map((c: any, idx: number) => ({
-              id: crypto.randomUUID(),
-              sr_no: (contacts.length + idx + 1).toString(),
-              name: c.name || "Unknown",
-              phone: c.phone || "",
-              message_template: settings.defaultTemplate,
-              status: 'pending'
-            }));
-            setContacts([...contacts, ...newContacts]);
-            toast.success(`Scraped ${newContacts.length} members from ${groupName} (Fast)`);
+            setContacts(prev => {
+              const newContacts: Contact[] = response.data.map((c: any, idx: number) => ({
+                id: crypto.randomUUID(),
+                sr_no: (prev.length + idx + 1).toString(),
+                name: c.name || "Unknown",
+                phone: c.phone || "",
+                message_template: settings.defaultTemplate,
+                status: 'pending'
+              }));
+              
+              if (autoDownload) {
+                downloadDataAsCSV(newContacts, `members_${groupName.replace(/\s+/g, '_')}`);
+              }
+              
+              return [...prev, ...newContacts];
+            });
+            toast.success(`Scraped ${response.data.length} members from ${groupName} (Fast)`);
           } else {
             // Fallback to the UI-based scraping if IndexedDB fails or is empty
             setIsScraping(true);
@@ -384,16 +391,23 @@ export default function App() {
             }, (fallbackRes) => {
               setIsScraping(false);
               if (fallbackRes && fallbackRes.success) {
-                const newContacts: Contact[] = fallbackRes.data.map((c: any, idx: number) => ({
-                  id: crypto.randomUUID(),
-                  sr_no: (contacts.length + idx + 1).toString(),
-                  name: c.name || "Unknown",
-                  phone: c.phone || "",
-                  message_template: settings.defaultTemplate,
-                  status: 'pending'
-                }));
-                setContacts([...contacts, ...newContacts]);
-                toast.success(`Scraped ${newContacts.length} members from ${groupName} (UI Scrape)`);
+                setContacts(prev => {
+                  const newContacts: Contact[] = fallbackRes.data.map((c: any, idx: number) => ({
+                    id: crypto.randomUUID(),
+                    sr_no: (prev.length + idx + 1).toString(),
+                    name: c.name || "Unknown",
+                    phone: c.phone || "",
+                    message_template: settings.defaultTemplate,
+                    status: 'pending'
+                  }));
+                  
+                  if (autoDownload) {
+                    downloadDataAsCSV(newContacts, `members_${groupName.replace(/\s+/g, '_')}`);
+                  }
+                  
+                  return [...prev, ...newContacts];
+                });
+                toast.success(`Scraped ${fallbackRes.data.length} members from ${groupName} (UI Scrape)`);
               } else {
                 toast.error(fallbackRes?.error || "Failed to scrape group. Make sure the group is open.");
               }
@@ -511,32 +525,40 @@ export default function App() {
   };
 
   /**
-   * Downloads the current contact list as a CSV file.
+   * Downloads data as a CSV file.
    */
-  const downloadCSV = () => {
-    if (contacts.length === 0) {
+  const downloadDataAsCSV = (dataToDownload: any[], filenamePrefix: string = 'whatsapp_automation') => {
+    if (dataToDownload.length === 0) {
       toast.error("No data to download");
       return;
     }
-    const data = contacts.map(c => ({
+    const data = dataToDownload.map(c => ({
       'Sr. No': c.sr_no,
       'Name': c.name,
       'Phone': c.phone,
-      'Message Template': c.message_template,
-      'Status': c.status,
+      'Message Template': c.message_template || '',
+      'Status': c.status || 'pending',
       'Error': c.error || ''
     }));
     const ws = XLSX.utils.json_to_sheet(data);
     const csv = XLSX.utils.sheet_to_csv(ws);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob(["\ufeff", csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.setAttribute("href", url);
-    link.setAttribute("download", `whatsapp_automation_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute("download", `${filenamePrefix}_${new Date().toISOString().split('T')[0]}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  /**
+   * Downloads the current contact list as a CSV file.
+   */
+  const downloadCSV = () => {
+    downloadDataAsCSV(contacts);
   };
 
   const resetSettings = () => {
@@ -688,6 +710,10 @@ export default function App() {
                     }} className="text-slate-500 hover:text-slate-700 gap-1">
                       <RefreshCw className="w-3 h-3" />
                       Clear Status
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={downloadCSV} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 gap-1">
+                      <Download className="w-4 h-4" />
+                      Download CSV
                     </Button>
                     <Button variant="ghost" size="sm" onClick={clearContacts} className="text-red-500 hover:text-red-600 hover:bg-red-50 gap-1">
                       <Trash2 className="w-3 h-3" />
@@ -878,16 +904,28 @@ export default function App() {
                             </TableCell>
                             <TableCell className="font-medium">{group.subject}</TableCell>
                             <TableCell className="text-right">
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
-                                onClick={() => scrapeGroupMembers(group.id, group.subject)}
-                                disabled={isScraping}
-                                className="text-blue-600 border-blue-200 hover:bg-blue-50"
-                              >
-                                <Users className="w-3 h-3 mr-1" />
-                                Scrape Members
-                              </Button>
+                              <div className="flex justify-end gap-2">
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  onClick={() => scrapeGroupMembers(group.id, group.subject)}
+                                  disabled={isScraping}
+                                  className="text-blue-600 border-blue-200 hover:bg-blue-50"
+                                >
+                                  <Users className="w-3 h-3 mr-1" />
+                                  Scrape
+                                </Button>
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  onClick={() => scrapeGroupMembers(group.id, group.subject, true)}
+                                  disabled={isScraping}
+                                  className="text-green-600 border-green-200 hover:bg-green-50"
+                                >
+                                  <Download className="w-3 h-3 mr-1" />
+                                  Scrape & Download
+                                </Button>
+                              </div>
                             </TableCell>
                           </TableRow>
                         ))
@@ -959,14 +997,25 @@ export default function App() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <Button 
-                  className="w-full bg-green-600 hover:bg-green-700 text-white" 
-                  onClick={() => scrapeGroupMembers("", "")}
-                  disabled={isScraping}
-                >
-                  {isScraping ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
-                  Scrape Open Group
-                </Button>
+                <div className="grid grid-cols-1 gap-2">
+                  <Button 
+                    className="w-full bg-green-600 hover:bg-green-700 text-white" 
+                    onClick={() => scrapeGroupMembers("", "")}
+                    disabled={isScraping}
+                  >
+                    {isScraping ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
+                    Scrape Open Group
+                  </Button>
+                  <Button 
+                    variant="outline"
+                    className="w-full border-green-200 text-green-700 hover:bg-green-50" 
+                    onClick={() => scrapeGroupMembers("", "", true)}
+                    disabled={isScraping}
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    Scrape & Download CSV
+                  </Button>
+                </div>
                 <p className="text-xs text-slate-500">
                   Open a group in WhatsApp, click the group name to see info, then click "View all" members before using this.
                 </p>
