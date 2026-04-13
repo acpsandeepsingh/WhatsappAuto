@@ -405,17 +405,50 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         return true; // Keep channel open for async response
     }
+
+    if (request.action === "SEND_MESSAGE_INTERNAL") {
+        console.log(`[WA Auto] Bridge: Relaying SEND_MESSAGE_INTERNAL for ${request.phone}`);
+        const requestId = Math.random().toString(36).substring(7);
+        pendingRequests.set(requestId, sendResponse);
+
+        window.postMessage({
+            type: "WA_SEND_MESSAGE",
+            requestId,
+            phone: request.phone,
+            message: request.message
+        }, "*");
+
+        return true;
+    }
+
+    if (request.action === "GET_GROUPS_INTERNAL") {
+        console.log(`[WA Auto] Bridge: Relaying GET_GROUPS_INTERNAL`);
+        const requestId = Math.random().toString(36).substring(7);
+        pendingRequests.set(requestId, sendResponse);
+
+        window.postMessage({
+            type: "WA_GET_GROUPS",
+            requestId
+        }, "*");
+
+        return true;
+    }
 });
 
 // Listen for messages from the MAIN world
 window.addEventListener("message", (event) => {
     if (event.source !== window) return;
-    if (event.data && event.data.type === "WA_OPEN_CHAT_RESULT") {
-        const { requestId, success, error, phone } = event.data;
-        console.log(`[WA Auto] Bridge: Received result for ${phone}: success=${success}`);
+    
+    if (event.data && (
+        event.data.type === "WA_OPEN_CHAT_RESULT" || 
+        event.data.type === "WA_SEND_MESSAGE_RESULT" || 
+        event.data.type === "WA_GET_GROUPS_RESULT"
+    )) {
+        const { requestId, ...rest } = event.data;
+        console.log(`[WA Auto] Bridge: Received result for ${event.data.type}`);
         const sendResponse = pendingRequests.get(requestId);
         if (sendResponse) {
-            sendResponse({ success, error, phone });
+            sendResponse(rest);
             pendingRequests.delete(requestId);
         }
     }
