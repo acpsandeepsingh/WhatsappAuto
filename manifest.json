@@ -29,6 +29,6 @@
    "version": "1.2.83",
    "web_accessible_resources": [ {
       "matches": [ "*://*.whatsapp.com/*" ],
-      "resources": [ "js/inject/inject.js", "WAPlusSenderTemplate.xlsx", "pic/crm-commend.png", "li-popup/li-popup.html", "js/inject/obfuscate.js", "fonts/*", "img/*", "css/*", "images/*" ]
+      "resources": [ "js/inject/inject.js", "WAPlusSenderTemplate.xlsx", "pic/crm-commend.png", "li-popup/li-popup.html", "js/inject/obfuscate.js", "fonts/*", "css/*", "images/*" ]
    } ]
 }
