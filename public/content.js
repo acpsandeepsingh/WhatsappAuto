@@ -382,3 +382,41 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 });
+
+/**
+ * Bridge Layer for MAIN world communication.
+ * Relays messages between the isolated content script and the MAIN world script.
+ */
+const pendingRequests = new Map();
+
+// Listen for messages from the background script
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === "OPEN_CHAT_INTERNAL") {
+        console.log(`[WA Auto] Bridge: Relaying OPEN_CHAT_INTERNAL for ${request.phone}`);
+        const requestId = Math.random().toString(36).substring(7);
+        pendingRequests.set(requestId, sendResponse);
+
+        // Relay to MAIN world
+        window.postMessage({
+            type: "WA_OPEN_CHAT",
+            requestId,
+            phone: request.phone
+        }, "*");
+
+        return true; // Keep channel open for async response
+    }
+});
+
+// Listen for messages from the MAIN world
+window.addEventListener("message", (event) => {
+    if (event.source !== window) return;
+    if (event.data && event.data.type === "WA_OPEN_CHAT_RESULT") {
+        const { requestId, success, error, phone } = event.data;
+        console.log(`[WA Auto] Bridge: Received result for ${phone}: success=${success}`);
+        const sendResponse = pendingRequests.get(requestId);
+        if (sendResponse) {
+            sendResponse({ success, error, phone });
+            pendingRequests.delete(requestId);
+        }
+    }
+});

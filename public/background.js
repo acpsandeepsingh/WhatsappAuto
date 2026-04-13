@@ -130,6 +130,53 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         total: state.queue.length
       });
       break;
+    case "OPEN_CHAT":
+      (async () => {
+        try {
+          const tabs = await chrome.tabs.query({ url: "https://web.whatsapp.com/*" });
+          if (tabs.length === 0) {
+            sendResponse({ success: false, error: "WhatsApp tab not found" });
+            return;
+          }
+          
+          const tabId = tabs[0].id;
+
+          // Check if already injected to avoid re-injecting the large testinject.js
+          const checkInjected = await chrome.scripting.executeScript({
+            target: { tabId },
+            world: "MAIN",
+            func: () => !!window.BULK_WPP
+          }).catch(() => [{ result: false }]);
+          
+          if (!checkInjected[0]?.result) {
+            console.log("[BG] Injecting testinject.js...");
+            await chrome.scripting.executeScript({
+              target: { tabId },
+              world: "MAIN",
+              files: ["testinject.js"]
+            });
+          }
+
+          // Always ensure inject.js bridge is there (it has its own guard)
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            world: "MAIN",
+            files: ["inject.js"]
+          });
+
+          // Send message to the content script to relay to the MAIN world
+          chrome.tabs.sendMessage(tabId, {
+            action: "OPEN_CHAT_INTERNAL",
+            phone: request.phone
+          }, (response) => {
+            sendResponse(response);
+          });
+        } catch (error) {
+          console.error("[BG] OPEN_CHAT error:", error);
+          sendResponse({ success: false, error: error.message });
+        }
+      })();
+      return true; // Keep channel open for async response
   }
   return true;
 });
