@@ -54,14 +54,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "start_queue") {
     queue = (request.contacts || []).map(c => {
       // Ensure message is populated from template if missing
-      if (!c.message && c.message_template) {
-        let msg = c.message_template;
-        msg = msg.replace(/{{name}}/g, c.name || "");
-        msg = msg.replace(/{{phone}}/g, c.phone || "");
-        msg = msg.replace(/{{sr_no}}/g, c.sr_no || "");
-        return { ...c, message: msg };
+      let item = { ...c, retries: 0 };
+      if (!item.message && item.message_template) {
+        let msg = item.message_template;
+        msg = msg.replace(/{{name}}/g, item.name || "");
+        msg = msg.replace(/{{phone}}/g, item.phone || "");
+        msg = msg.replace(/{{sr_no}}/g, item.sr_no || "");
+        item.message = msg;
       }
-      return c;
+      return item;
     });
     settings = request.settings || {};
     status = 'running';
@@ -131,6 +132,13 @@ async function processNext() {
   }
 
   const contact = queue[currentIndex];
+  
+  // Apply global attachment if contact doesn't have one
+  const dataToSend = {
+    ...contact,
+    attachment: contact.attachment || settings.attachment
+  };
+
   chrome.tabs.query({ url: "*://*.whatsapp.com/*" }, async (tabs) => {
     if (tabs.length === 0) {
       status = 'stopped';
@@ -138,9 +146,21 @@ async function processNext() {
       return;
     }
 
-    chrome.tabs.sendMessage(tabs[0].id, { action: "process_row", data: contact, settings }, (response) => {
+    chrome.tabs.sendMessage(tabs[0].id, { action: "process_row", data: dataToSend, settings }, (response) => {
       if (chrome.runtime.lastError || !response || !response.success) {
-        broadcastStatus(null, contact.id, 'failed', response?.error || "Unknown error");
+        const errorMsg = response?.error || "Unknown error";
+        
+        if (contact.retries < (settings.maxRetries || 0)) {
+          contact.retries++;
+          console.log(`[Background] Retrying contact ${contact.id} (${contact.retries}/${settings.maxRetries})`);
+          broadcastStatus(null, contact.id, 'retrying', `Retry ${contact.retries}: ${errorMsg}`);
+          
+          // Wait a bit before retrying the same contact
+          setTimeout(processNext, 3000);
+          return;
+        } else {
+          broadcastStatus(null, contact.id, 'failed', errorMsg);
+        }
       } else {
         broadcastStatus(null, contact.id, response.status || 'sent');
       }

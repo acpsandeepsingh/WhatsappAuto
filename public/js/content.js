@@ -25,6 +25,7 @@ const SELECTORS = {
   fileInputs: 'input[type="file"]',
   newChatBtn: 'button[aria-label="New chat"], span[data-icon="new-chat-outline"]',
   newChatSearch: 'div[role="textbox"][aria-label="Search name or number"], input[aria-label="Search name or number"]',
+  chatHeaderTitle: 'div[role="button"][data-tab="6"] span[dir="auto"]',
   statusIcons: {
     sent: 'span[data-icon="msg-check"][aria-label*="Sent"]',
     delivered: 'span[data-icon="msg-dblcheck"][aria-label*="Delivered"]',
@@ -88,17 +89,21 @@ async function smartWait(selector, fallbackDelay) {
 async function searchAndOpenChat(phone, message = "", name = "") {
   console.log(`[WhatsApp Automation] Opening chat for: ${phone} (${name})`);
   
-  if (phone.includes('@g.us')) {
-    // It's a group, use the internal API via the injected script
+  const isGroup = phone.includes('@g.us');
+  
+  if (automationSettings.useDirectOpen || isGroup) {
+    // Try direct open first
     try {
+      console.log("[WhatsApp Automation] Attempting direct chat open...");
       const res = await callInjected("WA_OPEN_CHAT", { phone });
       if (res.useFallback) {
         throw new Error("API fallback requested");
       }
+      // Wait for chat to load using setting
+      await smartWait(SELECTORS.messageBox, automationSettings.openChatDelay);
     } catch (err) {
-      console.warn("[WhatsApp Automation] Group open API failed, trying manual search", err);
+      console.warn("[WhatsApp Automation] Direct open failed, falling back to search:", err.message);
       
-      // Fallback: search for group name in sidebar
       const searchBox = await waitForElement(SELECTORS.searchBox);
       if (searchBox) {
         searchBox.click();
@@ -106,95 +111,82 @@ async function searchAndOpenChat(phone, message = "", name = "") {
         document.execCommand('selectAll', false, null);
         document.execCommand('delete', false, null);
         
-        // Use group name for searching as requested
-        const searchTerm = name || phone;
+        const searchTerm = isGroup ? (name || phone) : phone;
         document.execCommand('insertText', false, searchTerm);
         searchBox.dispatchEvent(new Event('input', { bubbles: true }));
-        await sleep(1500); // Wait for results to filter
+        
+        // Wait for results using setting
+        await sleep(automationSettings.searchDelay);
         
         const chatList = document.querySelector(SELECTORS.chatList);
         if (chatList) {
-          // Try to find the specific row that matches the name
           const rows = chatList.querySelectorAll(SELECTORS.chatRow);
           let targetRow = null;
           
-          // First pass: Look for exact title match
-          for (const row of rows) {
-            const titleEl = row.querySelector('span[title]');
-            const title = titleEl ? titleEl.getAttribute('title') : "";
-            if (title.toLowerCase() === searchTerm.toLowerCase()) {
-              targetRow = row;
-              console.log("[WhatsApp Automation] Found exact title match");
-              break;
-            }
-          }
-          
-          // Second pass: Fallback to includes if no exact match
-          if (!targetRow) {
+          if (isGroup) {
+            // Prioritize exact name match for groups
             for (const row of rows) {
-              const rowText = row.innerText.toLowerCase();
-              if (rowText.includes(searchTerm.toLowerCase())) {
+              const titleEl = row.querySelector('span[title]');
+              const title = titleEl ? titleEl.getAttribute('title') : "";
+              if (title.toLowerCase() === searchTerm.toLowerCase()) {
                 targetRow = row;
-                console.log("[WhatsApp Automation] Found partial match");
                 break;
               }
             }
           }
+          
+          if (!targetRow && rows.length > 0) targetRow = rows[0];
 
           if (targetRow) {
-            console.log("[WhatsApp Automation] Clicking matching row...");
-            // Target the specific gridcell mentioned by user
             const target = targetRow.querySelector('div[role="gridcell"]._ak8o') || targetRow.querySelector('div[role="button"]') || targetRow;
-            
-            // Use a more forceful click mechanism
             const clickEvent = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window });
             target.dispatchEvent(clickEvent);
             await sleep(100);
-            targetRow.click(); // Click the row itself or target
             target.click();
             const upEvent = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window });
             target.dispatchEvent(upEvent);
           }
-          if (!targetRow && rows.length > 0) {
-            console.log("[WhatsApp Automation] No match found, clicking first result as fallback");
-            const firstTarget = rows[0].querySelector('div[role="gridcell"]._ak8o') || rows[0];
-            firstTarget.click();
-          }
         }
       }
     }
+  } else {
+    // Legacy mode: Use api.whatsapp.com/send
+    const number = phone.replace(/\D/g, "");
+    const text = encodeURIComponent(message);
     
+    console.log(`[WhatsApp Automation] Navigating to chat for ${number} via api.whatsapp.com`);
+    const a = document.createElement("a");
+    a.href = `https://api.whatsapp.com/send?phone=${number}&text=${text}`;
+    a.target = "_self";
+    document.body.appendChild(a);
+    a.click();
+    await sleep(1000);
+    if (a.parentNode) a.parentNode.removeChild(a);
+  }
+  
     // Wait for the chat to actually load
     const messageBox = await waitForElement(SELECTORS.messageBox, 20000);
     if (!messageBox) {
       throw new Error("Message box not found. Make sure the chat is open and loaded.");
     }
+
+    // Verify the chat name if provided
+    if (name) {
+      await sleep(500); // Small wait for header to update
+      const headerTitle = document.querySelector(SELECTORS.chatHeaderTitle);
+      if (headerTitle) {
+        const openedName = headerTitle.innerText.trim();
+        console.log(`[WhatsApp Automation] Verifying opened chat: "${openedName}" vs expected: "${name}"`);
+        if (openedName.toLowerCase() !== name.toLowerCase()) {
+          console.warn(`[WhatsApp Automation] Name mismatch! Opened: "${openedName}", Expected: "${name}"`);
+          // If it's a critical mismatch, we might want to stop, but for now let's just log
+        } else {
+          console.log("[WhatsApp Automation] Chat name verified successfully.");
+        }
+      }
+    }
+
     return true;
-  }
-
-  // Use api.whatsapp.com/send as requested by the user
-  const number = phone.replace(/\D/g, "");
-  const text = encodeURIComponent(message);
-  
-  console.log(`[WhatsApp Automation] Navigating to chat for ${number} via api.whatsapp.com`);
-  const a = document.createElement("a");
-  a.href = `https://api.whatsapp.com/send?phone=${number}&text=${text}`;
-  a.target = "_self";
-  document.body.appendChild(a);
-  a.click();
-  // We don't remove the element immediately to ensure the click is processed
-  await sleep(1000);
-  if (a.parentNode) a.parentNode.removeChild(a);
-
-  // Wait for the chat to actually load
-  const messageBox = await waitForElement(SELECTORS.messageBox, 35000);
-  if (!messageBox) {
-    throw new Error("Message box not found after opening chat. Please ensure you are logged in to WhatsApp Web.");
-  }
-  
-  // Extra delay to ensure text from URL is processed by WhatsApp
-  await sleep(2000);
-  return true;
 }
 
 async function injectMessage(text) {
@@ -222,7 +214,7 @@ async function injectMessage(text) {
     
     document.execCommand('insertText', false, text);
     messageBox.dispatchEvent(new Event('input', { bubbles: true }));
-    await sleep(2500);
+    await sleep(automationSettings.pasteDelay);
   } else {
     console.log("[WhatsApp Automation] Message box already has text, skipping typing");
   }

@@ -1424,6 +1424,50 @@ export default function App() {
                       className="h-8"
                     />
                   </div>
+                  <div className="grid gap-2 p-2 bg-slate-50 rounded border border-slate-100">
+                    <Label className="text-xs font-bold text-slate-500 flex items-center gap-1">
+                      <Paperclip className="w-3 h-3" />
+                      Global Attachment
+                    </Label>
+                    <div className="flex items-center gap-2">
+                      <Input 
+                        type="file" 
+                        className="h-8 text-[10px]" 
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = (ev) => {
+                              setSettings(prev => ({
+                                ...prev,
+                                attachment: {
+                                  name: file.name,
+                                  dataUrl: ev.target?.result as string
+                                }
+                              }));
+                              toast.success("Global attachment set");
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                      {settings.attachment && (
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-8 w-8 text-red-500"
+                          onClick={() => setSettings(prev => ({ ...prev, attachment: undefined }))}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </div>
+                    {settings.attachment && (
+                      <p className="text-[10px] text-slate-500 truncate">
+                        Selected: {settings.attachment.name}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
               
