@@ -239,7 +239,7 @@ export default function App() {
     );
   }, [groups, groupSearchTerm]);
 
-  const openDirectChat = (phone: string, sendDraft = false) => {
+  const openDirectChat = (phone: string, sendDraft = false, name?: string) => {
     if (!phone) {
       toast.error("Contact ID/Phone is required");
       return;
@@ -250,14 +250,19 @@ export default function App() {
     setOpeningChatId(target);
     
     if (typeof chrome !== 'undefined' && chrome.runtime) {
-      // Find the contact to get the message
+      // Find the contact or group to get the message/name
       const contact = contacts.find(c => c.phone === phone);
-      const message = sendDraft && contact ? parseTemplate(contact.message_template, contact) : "";
+      const group = groups.find(g => g.id === phone);
+      
+      const targetName = name || contact?.name || group?.subject || "";
+      const message = sendDraft ? (contact ? parseTemplate(contact.message_template, contact) : settings.defaultTemplate) : "";
 
       chrome.runtime.sendMessage({ 
         action: "OPEN_CHAT", 
         phone: target,
+        name: targetName,
         message: message,
+        attachment: sendDraft ? settings.attachment : null,
         sendImmediately: sendDraft,
         useDirectMethod: true // Signal to use WPP.chat.open or similar
       }, (response) => {
@@ -431,22 +436,20 @@ export default function App() {
         }, (response) => {
           setIsScraping(false);
           if (response && response.success) {
-            setContacts(prev => {
-              const newContacts: Contact[] = response.data.map((c: any, idx: number) => ({
-                id: crypto.randomUUID(),
-                sr_no: (prev.length + idx + 1).toString(),
-                name: c.name || "Unknown",
-                phone: c.phone || "",
-                message_template: settings.defaultTemplate,
-                status: 'pending'
-              }));
-              
-              if (autoDownload) {
-                downloadDataAsCSV(newContacts, `members_${groupName.replace(/\s+/g, '_')}`);
-              }
-              
-              return [...prev, ...newContacts];
-            });
+            const newContacts: Contact[] = response.data.map((c: any, idx: number) => ({
+              id: crypto.randomUUID(),
+              sr_no: (contacts.length + idx + 1).toString(),
+              name: c.name || "Unknown",
+              phone: c.phone || "",
+              message_template: settings.defaultTemplate,
+              status: 'pending'
+            }));
+            
+            if (autoDownload) {
+              downloadDataAsCSV(newContacts, `members_${groupName.replace(/\s+/g, '_')}`);
+            } else {
+              setContacts(prev => [...prev, ...newContacts]);
+            }
             toast.success(`Scraped ${response.data.length} members from ${groupName} (Fast)`);
           } else {
             // Fallback to the UI-based scraping if IndexedDB fails or is empty
@@ -457,22 +460,20 @@ export default function App() {
             }, (fallbackRes) => {
               setIsScraping(false);
               if (fallbackRes && fallbackRes.success) {
-                setContacts(prev => {
-                  const newContacts: Contact[] = fallbackRes.data.map((c: any, idx: number) => ({
-                    id: crypto.randomUUID(),
-                    sr_no: (prev.length + idx + 1).toString(),
-                    name: c.name || "Unknown",
-                    phone: c.phone || "",
-                    message_template: settings.defaultTemplate,
-                    status: 'pending'
-                  }));
-                  
-                  if (autoDownload) {
-                    downloadDataAsCSV(newContacts, `members_${groupName.replace(/\s+/g, '_')}`);
-                  }
-                  
-                  return [...prev, ...newContacts];
-                });
+                const newContacts: Contact[] = fallbackRes.data.map((c: any, idx: number) => ({
+                  id: crypto.randomUUID(),
+                  sr_no: (contacts.length + idx + 1).toString(),
+                  name: c.name || "Unknown",
+                  phone: c.phone || "",
+                  message_template: settings.defaultTemplate,
+                  status: 'pending'
+                }));
+                
+                if (autoDownload) {
+                  downloadDataAsCSV(newContacts, `members_${groupName.replace(/\s+/g, '_')}`);
+                } else {
+                  setContacts(prev => [...prev, ...newContacts]);
+                }
                 toast.success(`Scraped ${fallbackRes.data.length} members from ${groupName} (UI Scrape)`);
               } else {
                 toast.error(fallbackRes?.error || "Failed to scrape group. Make sure the group is open.");
@@ -935,7 +936,7 @@ export default function App() {
                                   variant="ghost" 
                                   size="icon" 
                                   className="opacity-0 group-hover:opacity-100 text-green-500 hover:text-green-600"
-                                  onClick={() => openDirectChat(contact.phone, true)}
+                                  onClick={() => openDirectChat(contact.phone, true, contact.name)}
                                   title="Send Drafted Message"
                                   disabled={openingChatId === contact.phone}
                                 >
@@ -1075,7 +1076,7 @@ export default function App() {
                         setSelectedGroups(prev => Array.from(new Set([...prev, ...filteredIds])));
                       }
                     }}>
-                      {filteredGroups.every(g => selectedGroups.includes(g.id)) ? "Deselect Filtered" : "Select Filtered"}
+                      {filteredGroups.every(g => selectedGroups.includes(g.id)) ? "Deselect All" : "Select All"}
                     </Button>
                   </div>
                   <div className="relative w-full md:w-80">
@@ -1123,7 +1124,7 @@ export default function App() {
                                 <Button 
                                   variant="outline" 
                                   size="sm" 
-                                  onClick={() => openDirectChat(group.id)}
+                                  onClick={() => openDirectChat(group.id, false, group.subject)}
                                   className="text-slate-600 border-slate-200 hover:bg-slate-50"
                                   title="Open Group Chat"
                                   disabled={openingChatId === group.id}
@@ -1134,6 +1135,17 @@ export default function App() {
                                     <ExternalLink className="w-3 h-3 mr-1" />
                                   )}
                                   Open
+                                </Button>
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  onClick={() => openDirectChat(group.id, true, group.subject)}
+                                  className="text-green-600 border-green-200 hover:bg-green-50"
+                                  title="Send Drafted Message"
+                                  disabled={openingChatId === group.id}
+                                >
+                                  <Send className="w-3 h-3 mr-1" />
+                                  Send
                                 </Button>
                                 <Button 
                                   variant="outline" 

@@ -116,28 +116,47 @@ async function searchAndOpenChat(phone, message = "", name = "") {
         if (chatList) {
           // Try to find the specific row that matches the name
           const rows = chatList.querySelectorAll(SELECTORS.chatRow);
-          let clicked = false;
+          let targetRow = null;
+          
+          // First pass: Look for exact title match
           for (const row of rows) {
-            const rowText = row.innerText.toLowerCase();
-            if (rowText.includes(searchTerm.toLowerCase())) {
-              console.log("[WhatsApp Automation] Found matching row, clicking...");
-              // Target the specific gridcell mentioned by user
-              const target = row.querySelector('div[role="gridcell"]._ak8o') || row.querySelector('div[role="button"]') || row;
-              
-              // Use a more forceful click mechanism
-              const clickEvent = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window });
-              target.dispatchEvent(clickEvent);
-              await sleep(100);
-              target.click();
-              const upEvent = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window });
-              target.dispatchEvent(upEvent);
-              
-              clicked = true;
+            const titleEl = row.querySelector('span[title]');
+            const title = titleEl ? titleEl.getAttribute('title') : "";
+            if (title.toLowerCase() === searchTerm.toLowerCase()) {
+              targetRow = row;
+              console.log("[WhatsApp Automation] Found exact title match");
               break;
             }
           }
-          if (!clicked && rows.length > 0) {
-            console.log("[WhatsApp Automation] No exact match found, clicking first result");
+          
+          // Second pass: Fallback to includes if no exact match
+          if (!targetRow) {
+            for (const row of rows) {
+              const rowText = row.innerText.toLowerCase();
+              if (rowText.includes(searchTerm.toLowerCase())) {
+                targetRow = row;
+                console.log("[WhatsApp Automation] Found partial match");
+                break;
+              }
+            }
+          }
+
+          if (targetRow) {
+            console.log("[WhatsApp Automation] Clicking matching row...");
+            // Target the specific gridcell mentioned by user
+            const target = targetRow.querySelector('div[role="gridcell"]._ak8o') || targetRow.querySelector('div[role="button"]') || targetRow;
+            
+            // Use a more forceful click mechanism
+            const clickEvent = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window });
+            target.dispatchEvent(clickEvent);
+            await sleep(100);
+            targetRow.click(); // Click the row itself or target
+            target.click();
+            const upEvent = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window });
+            target.dispatchEvent(upEvent);
+          }
+          if (!targetRow && rows.length > 0) {
+            console.log("[WhatsApp Automation] No match found, clicking first result as fallback");
             const firstTarget = rows[0].querySelector('div[role="gridcell"]._ak8o') || rows[0];
             firstTarget.click();
           }
@@ -148,7 +167,7 @@ async function searchAndOpenChat(phone, message = "", name = "") {
     // Wait for the chat to actually load
     const messageBox = await waitForElement(SELECTORS.messageBox, 20000);
     if (!messageBox) {
-      throw new Error("Group message box not found. Make sure you are a member of the group.");
+      throw new Error("Message box not found. Make sure the chat is open and loaded.");
     }
     return true;
   }

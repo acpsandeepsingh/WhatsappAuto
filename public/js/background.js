@@ -105,7 +105,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           data: { 
             phone: request.phone, 
             message: request.message || "",
-            name: request.name || ""
+            name: request.name || "",
+            attachment: request.attachment || null
           },
           settings: {
             ...settings,
