@@ -87,12 +87,29 @@ async function injectMessage(text) {
 
   messageBox.click();
   messageBox.focus();
-  document.execCommand('insertText', false, text);
-  messageBox.dispatchEvent(new Event('input', { bubbles: true }));
-  await sleep(1000);
+  
+  // Check if text is already there (e.g. from api.whatsapp.com/send?text=...)
+  const currentText = messageBox.innerText || messageBox.textContent || "";
+  if (!currentText.includes(text.substring(0, 10))) { 
+    // Only type if it's not already there or looks different
+    document.execCommand('selectAll', false, null);
+    document.execCommand('delete', false, null);
+    document.execCommand('insertText', false, text);
+    messageBox.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(1000);
+  }
 
-  const eventOptions = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
-  messageBox.dispatchEvent(new KeyboardEvent('keydown', eventOptions));
+  // Try clicking the send button first (more reliable than Enter key)
+  const sendBtn = await waitForElement(SELECTORS.sendBtn, 5000);
+  if (sendBtn) {
+    console.log("[WhatsApp Automation] Clicking send button");
+    sendBtn.click();
+  } else {
+    console.log("[WhatsApp Automation] Send button not found, trying Enter key");
+    const eventOptions = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+    messageBox.dispatchEvent(new KeyboardEvent('keydown', eventOptions));
+  }
+  
   await sleep(automationSettings.sendDelay);
   return true;
 }

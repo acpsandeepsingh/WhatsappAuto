@@ -26,6 +26,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "GET_STATUS") {
+    sendResponse({ status, currentIndex });
+    return true;
+  }
+
   if (request.action === "start_queue") {
     queue = request.contacts || [];
     settings = request.settings || {};
