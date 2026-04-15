@@ -74,11 +74,40 @@ async function searchAndOpenChat(phone, message = "") {
   if (phone.includes('@g.us')) {
     // It's a group, use the internal API via the injected script
     try {
-      await callInjected("WA_OPEN_CHAT", { phone });
+      const res = await callInjected("WA_OPEN_CHAT", { phone });
+      if (res.useFallback) {
+        throw new Error("API fallback requested");
+      }
     } catch (err) {
-      console.warn("[WhatsApp Automation] Group open failed, trying manual search", err);
+      console.warn("[WhatsApp Automation] Group open API failed, trying manual search", err);
+      
       // Fallback: search for group name in sidebar
-      // (Implementation omitted for brevity, but we wait for message box anyway)
+      const searchBox = await waitForElement(SELECTORS.searchBox);
+      if (searchBox) {
+        searchBox.click();
+        searchBox.focus();
+        document.execCommand('selectAll', false, null);
+        document.execCommand('delete', false, null);
+        
+        // We need the group name for searching. 
+        // We'll try to get it from the groups state if we can, 
+        // but since content script doesn't have it, we'll try to use the ID as a search term 
+        // (WhatsApp search works with some IDs or we can just try to find the chat if it's already in the list)
+        document.execCommand('insertText', false, phone);
+        searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+        await sleep(2000);
+        
+        const chatList = document.querySelector(SELECTORS.chatList);
+        if (chatList) {
+          const rows = chatList.querySelectorAll(SELECTORS.chatRow);
+          for (const row of rows) {
+            if (row.innerText.includes(phone) || row.innerHTML.includes(phone)) {
+              row.click();
+              break;
+            }
+          }
+        }
+      }
     }
     
     // Wait for the chat to actually load

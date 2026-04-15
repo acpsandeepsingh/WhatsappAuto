@@ -14,11 +14,17 @@
             request.onerror = () => reject(new Error("Failed to open IndexedDB"));
             request.onsuccess = (event) => {
                 const db = event.target.result;
-                if (!db.objectStoreNames.contains(storeName)) {
+                // Try to find the store even if the name is slightly different (common in WA updates)
+                const actualStoreName = db.objectStoreNames.contains(storeName) 
+                    ? storeName 
+                    : Array.from(db.objectStoreNames).find(name => name.includes(storeName));
+                
+                if (!actualStoreName) {
+                    console.warn(`Store ${storeName} not found in ${dbName}`);
                     return resolve([]);
                 }
-                const transaction = db.transaction(storeName, "readonly");
-                const store = transaction.objectStore(storeName);
+                const transaction = db.transaction(actualStoreName, "readonly");
+                const store = transaction.objectStore(actualStoreName);
                 const getAllRequest = store.getAll();
                 getAllRequest.onsuccess = () => {
                     resolve(getAllRequest.result.filter(filterFn));
@@ -47,12 +53,8 @@
                     await window.WPP.chat.open(chatId);
                     window.postMessage({ type: "WA_OPEN_CHAT_RESULT", requestId, success: true, phone }, "*");
                 } else {
-                    // Fallback: use the URL method if internal API is missing
-                    const number = chatId.split('@')[0];
-                    const url = `https://web.whatsapp.com/send?phone=${number}`;
-                    // We can't easily navigate without reload if we are in the main world and want to stay in the SPA
-                    // But we can try to find the chat in the UI or use a hidden link
-                    window.postMessage({ type: "WA_OPEN_CHAT_RESULT", requestId, success: false, error: "Internal API missing. Using fallback.", useFallback: true, phone }, "*");
+                    // Fallback: Signal to content script to use DOM-based search
+                    window.postMessage({ type: "WA_OPEN_CHAT_RESULT", requestId, success: false, error: "Internal API missing. Using DOM fallback.", useFallback: true, phone }, "*");
                 }
             } catch (err) {
                 window.postMessage({ type: "WA_OPEN_CHAT_RESULT", requestId, success: false, error: err.message, phone }, "*");
@@ -67,12 +69,12 @@
                 } else if (window.BULK_WPP && window.BULK_WPP.group && window.BULK_WPP.group.getAllMine) {
                     groups = await window.BULK_WPP.group.getAllMine();
                 } else {
-                    // Fallback to IndexedDB
+                    // Fallback to IndexedDB with multiple possible store names
                     console.log("WhatsApp Automation: Falling back to IndexedDB for groups");
                     const chats = await getFromIndexedDB("model-storage", "chat", (c) => c.id && c.id.includes("@g.us"));
                     groups = chats.map(c => ({
                         id: c.id,
-                        subject: c.name || c.formattedTitle || "Unknown Group",
+                        subject: c.name || c.formattedTitle || c.subject || "Unknown Group",
                         isGroup: true
                     }));
                 }
@@ -98,7 +100,13 @@
                     if (groupMetadata && groupMetadata.length > 0) {
                         members = groupMetadata[0].participants || [];
                     } else {
-                        throw new Error("Group metadata not found in IndexedDB. Please open the group manually once.");
+                        // Try fetching from chat store as fallback
+                        const chats = await getFromIndexedDB("model-storage", "chat", (c) => c.id === chatId);
+                        if (chats && chats.length > 0 && chats[0].groupMetadata) {
+                            members = chats[0].groupMetadata.participants || [];
+                        } else {
+                            throw new Error("Group metadata not found in IndexedDB. Please open the group manually once.");
+                        }
                     }
                 }
                 window.postMessage({ type: "WA_SCRAPE_GROUP_RESULT", requestId, success: true, data: members }, "*");
@@ -120,7 +128,7 @@
                     const allContacts = await getFromIndexedDB("model-storage", "contact", (c) => c.id && c.id.includes("@c.us"));
                     contacts = allContacts.map(c => ({
                         id: c.id,
-                        name: c.name || c.pushname || c.formattedName || "Unknown",
+                        name: c.name || c.pushname || c.formattedName || c.shortName || "Unknown",
                         phone: c.id.split('@')[0]
                     }));
                 }
