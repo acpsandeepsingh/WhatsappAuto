@@ -93,16 +93,28 @@ async function searchAndOpenChat(phone, message = "", name = "") {
         const searchTerm = name || phone;
         document.execCommand('insertText', false, searchTerm);
         searchBox.dispatchEvent(new Event('input', { bubbles: true }));
-        await sleep(2000);
+        await sleep(2500); // Wait for results to filter
         
         const chatList = document.querySelector(SELECTORS.chatList);
         if (chatList) {
+          // Try to find the specific row that matches the name
           const rows = chatList.querySelectorAll(SELECTORS.chatRow);
+          let clicked = false;
           for (const row of rows) {
-            if (row.innerText.toLowerCase().includes(searchTerm.toLowerCase())) {
-              row.click();
+            const rowText = row.innerText.toLowerCase();
+            if (rowText.includes(searchTerm.toLowerCase())) {
+              console.log("[WhatsApp Automation] Found matching row, clicking...");
+              // Click the inner div that usually handles the click event
+              const clickable = row.querySelector('div[role="button"]') || row.querySelector('div') || row;
+              clickable.click();
+              clicked = true;
               break;
             }
+          }
+          if (!clicked && rows.length > 0) {
+            // Fallback: click the first result if no exact match but results exist
+            console.log("[WhatsApp Automation] No exact match found, clicking first result");
+            rows[0].click();
           }
         }
       }
@@ -116,26 +128,26 @@ async function searchAndOpenChat(phone, message = "", name = "") {
     return true;
   }
 
-  // Use the requested logic to open chat via api.whatsapp.com
+  // Use web.whatsapp.com/send for better reliability within the app
   const number = phone.replace(/\D/g, "");
   const text = encodeURIComponent(message);
   
   const a = document.createElement("a");
-  // Use api.whatsapp.com as requested by user
-  a.href = `https://api.whatsapp.com/send?phone=${number}&text=${text}`;
+  // Using web.whatsapp.com/send is more reliable for pre-filling text in the same tab
+  a.href = `https://web.whatsapp.com/send?phone=${number}&text=${text}`;
   a.target = "_self";
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
 
   // Wait for the chat to actually load
-  const messageBox = await waitForElement(SELECTORS.messageBox, 20000);
+  const messageBox = await waitForElement(SELECTORS.messageBox, 25000);
   if (!messageBox) {
     throw new Error("Message box not found after opening chat. Please ensure you are logged in to WhatsApp Web.");
   }
   
-  // Extra delay for contact mode to ensure send button logic works same as group
-  await sleep(1000);
+  // Extra delay to ensure text from URL is processed by WhatsApp
+  await sleep(2000);
   return true;
 }
 
@@ -147,13 +159,18 @@ async function injectMessage(text) {
   messageBox.click();
   messageBox.focus();
   
-  // Check if text is already there (e.g. from api.whatsapp.com/send?text=...)
-  const currentText = messageBox.innerText || messageBox.textContent || "";
-  if (!currentText.trim()) { 
-    // If empty, type it
+  // Check if text is already there (e.g. from web.whatsapp.com/send?text=...)
+  // We trim and check length to be sure
+  const currentText = (messageBox.innerText || messageBox.textContent || "").trim();
+  if (currentText.length < 2) { 
+    console.log("[WhatsApp Automation] Message box empty, typing message...");
+    document.execCommand('selectAll', false, null);
+    document.execCommand('delete', false, null);
     document.execCommand('insertText', false, text);
     messageBox.dispatchEvent(new Event('input', { bubbles: true }));
     await sleep(1000);
+  } else {
+    console.log("[WhatsApp Automation] Message box already has text, skipping typing");
   }
 
   // Try clicking the send button first (more reliable than Enter key)
