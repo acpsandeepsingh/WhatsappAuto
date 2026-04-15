@@ -95,18 +95,22 @@ interface AppSettings {
   useSmartWait: boolean;
   useDirectOpen: boolean;
   autoStartTime?: string; // ISO string or empty
+  attachment?: {
+    name: string;
+    dataUrl: string;
+  };
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
-  minDelay: 3000,
-  maxDelay: 10000,
+  minDelay: 2000,
+  maxDelay: 5000,
   randomDelay: true,
   maxRetries: 3,
   defaultTemplate: "Hello {{name}}, this is a message for you.",
-  searchDelay: 3000,
-  openChatDelay: 4000,
-  pasteDelay: 4000,
-  sendDelay: 2000,
+  searchDelay: 1500,
+  openChatDelay: 2000,
+  pasteDelay: 2000,
+  sendDelay: 1000,
   useSmartWait: true,
   useDirectOpen: true,
   autoStartTime: ""
@@ -486,6 +490,7 @@ export default function App() {
         name: group?.subject || "Unknown Group",
         phone: group?.id || group?.subject || "", // Prefer ID for direct open
         message_template: settings.defaultTemplate,
+        attachment: settings.attachment, // Include campaign attachment
         status: 'pending'
       };
     });
@@ -939,22 +944,99 @@ export default function App() {
 
         {activeTab === 'groups' && (
           <div className="space-y-6">
+            <Card className="border-none shadow-sm bg-white">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <MessageSquare className="w-5 h-5 text-green-600" />
+                  Campaign Settings
+                </CardTitle>
+                <CardDescription>Configure the message and attachment for this campaign.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="campaign-msg">Default Message Template</Label>
+                  <Textarea 
+                    id="campaign-msg"
+                    placeholder="Type your message here... Use {{name}} for personalization."
+                    value={settings.defaultTemplate}
+                    onChange={(e) => setSettings(prev => ({ ...prev, defaultTemplate: e.target.value }))}
+                    className="min-h-[100px] resize-y"
+                  />
+                  <p className="text-[10px] text-slate-400 italic">
+                    Placeholders: {"{{name}}"}, {"{{phone}}"}, {"{{sr_no}}"}
+                  </p>
+                </div>
+                
+                <div className="flex items-center gap-4">
+                  <div className="flex-1">
+                    <Label className="mb-2 block">Campaign Attachment</Label>
+                    {settings.attachment ? (
+                      <div className="flex items-center justify-between p-2 bg-slate-50 border rounded-md">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-blue-500" />
+                          <span className="text-sm font-medium truncate max-w-[200px]">{settings.attachment.name}</span>
+                        </div>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={() => setSettings(prev => ({ ...prev, attachment: undefined }))}
+                          className="h-8 w-8 p-0 text-slate-400 hover:text-red-500"
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <Button 
+                          variant="outline" 
+                          onClick={() => {
+                            const input = document.createElement('input');
+                            input.type = 'file';
+                            input.onchange = (e: any) => {
+                              const file = e.target.files[0];
+                              if (!file) return;
+                              const reader = new FileReader();
+                              reader.onload = (evt) => {
+                                setSettings(prev => ({
+                                  ...prev,
+                                  attachment: {
+                                    name: file.name,
+                                    dataUrl: evt.target?.result as string
+                                  }
+                                }));
+                                toast.success("Attachment added to campaign");
+                              };
+                              reader.readAsDataURL(file);
+                            };
+                            input.click();
+                          }}
+                          className="w-full border-dashed border-2 h-12 hover:bg-slate-50 hover:border-slate-300"
+                        >
+                          <Paperclip className="w-4 h-4 mr-2" />
+                          Attach File to Campaign
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-col justify-end h-full pt-6">
+                    <Button onClick={startGroupCampaign} className="bg-green-600 hover:bg-green-700 text-white h-12 px-8">
+                      <Play className="w-4 h-4 mr-2" />
+                      Start Campaign
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
             <div className="flex items-center justify-between">
               <div className="flex flex-col">
-                <h2 className="text-xl font-bold">Group Campaign</h2>
-                <p className="text-xs text-slate-500">Select groups to start a bulk messaging campaign.</p>
-                <div className="mt-2 p-2 bg-blue-50 border border-blue-100 rounded-md text-[10px] text-blue-700 max-w-md">
-                  <strong>Current Default Message:</strong> {settings.defaultTemplate.substring(0, 100)}{settings.defaultTemplate.length > 100 ? '...' : ''}
-                </div>
+                <h2 className="text-xl font-bold">Select Target Groups</h2>
+                <p className="text-xs text-slate-500">Choose which groups will receive the message above.</p>
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={fetchGroups} disabled={isScraping}>
                   {isScraping ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
                   Refresh Groups
-                </Button>
-                <Button onClick={startGroupCampaign} className="bg-green-600 hover:bg-green-700 text-white">
-                  <Play className="w-4 h-4 mr-2" />
-                  Start Group Campaign
                 </Button>
               </div>
             </div>

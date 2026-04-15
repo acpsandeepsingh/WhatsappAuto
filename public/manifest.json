@@ -6,7 +6,7 @@
       "service_worker": "js/background.js"
    },
    "content_scripts": [ {
-      "js": [ "js/inject/content-script.js", "js/load.js" ],
+      "js": [ "js/content.js" ],
       "matches": [ "*://*.whatsapp.com/*" ],
       "run_at": "document_end"
    } ],
@@ -20,6 +20,6 @@
    "version": "1.0.0",
    "web_accessible_resources": [ {
       "matches": [ "*://*.whatsapp.com/*" ],
-      "resources": [ "js/inject/inject.js", "js/inject/obfuscate.js" ]
+      "resources": [ "js/inject.js" ]
    } ]
 }

@@ -1,4 +1,15 @@
-// content-script.js
+// js/content.js
+(function() {
+    // Inject the main world script
+    const script = document.createElement('script');
+    script.src = chrome.runtime.getURL('js/inject.js');
+    script.onload = function() {
+        this.remove();
+    };
+    (document.head || document.documentElement).appendChild(script);
+    console.log("WhatsApp Automation: Injector script executed");
+})();
+
 console.log("WhatsApp Automation Loaded");
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -17,10 +28,10 @@ const SELECTORS = {
 };
 
 let automationSettings = {
-  searchDelay: 3000,
-  openChatDelay: 4000,
-  pasteDelay: 4000,
-  sendDelay: 2000,
+  searchDelay: 1500,
+  openChatDelay: 2000,
+  pasteDelay: 2000,
+  sendDelay: 1000,
   useSmartWait: true
 };
 
@@ -93,7 +104,7 @@ async function searchAndOpenChat(phone, message = "", name = "") {
         const searchTerm = name || phone;
         document.execCommand('insertText', false, searchTerm);
         searchBox.dispatchEvent(new Event('input', { bubbles: true }));
-        await sleep(3500); // Wait for results to filter
+        await sleep(1500); // Wait for results to filter
         
         const chatList = document.querySelector(SELECTORS.chatList);
         if (chatList) {
@@ -157,7 +168,7 @@ async function searchAndOpenChat(phone, message = "", name = "") {
   }
   
   // Extra delay to ensure text from URL is processed by WhatsApp
-  await sleep(4000);
+  await sleep(2000);
   return true;
 }
 
