@@ -93,7 +93,7 @@ async function searchAndOpenChat(phone, message = "", name = "") {
         const searchTerm = name || phone;
         document.execCommand('insertText', false, searchTerm);
         searchBox.dispatchEvent(new Event('input', { bubbles: true }));
-        await sleep(3000); // Wait for results to filter
+        await sleep(3500); // Wait for results to filter
         
         const chatList = document.querySelector(SELECTORS.chatList);
         if (chatList) {
@@ -128,27 +128,28 @@ async function searchAndOpenChat(phone, message = "", name = "") {
     return true;
   }
 
-  // For contacts, we'll try the URL method but with a more aggressive typing fallback
+  // Use api.whatsapp.com/send as requested by the user
   const number = phone.replace(/\D/g, "");
   const text = encodeURIComponent(message);
   
-  console.log(`[WhatsApp Automation] Navigating to chat for ${number}`);
+  console.log(`[WhatsApp Automation] Navigating to chat for ${number} via api.whatsapp.com`);
   const a = document.createElement("a");
-  // Using web.whatsapp.com/send is the standard way to open with text
-  a.href = `https://web.whatsapp.com/send?phone=${number}&text=${text}`;
+  a.href = `https://api.whatsapp.com/send?phone=${number}&text=${text}`;
   a.target = "_self";
   document.body.appendChild(a);
   a.click();
-  document.body.removeChild(a);
+  // We don't remove the element immediately to ensure the click is processed
+  await sleep(1000);
+  if (a.parentNode) a.parentNode.removeChild(a);
 
   // Wait for the chat to actually load
-  const messageBox = await waitForElement(SELECTORS.messageBox, 30000);
+  const messageBox = await waitForElement(SELECTORS.messageBox, 35000);
   if (!messageBox) {
     throw new Error("Message box not found after opening chat. Please ensure you are logged in to WhatsApp Web.");
   }
   
   // Extra delay to ensure text from URL is processed by WhatsApp
-  await sleep(3000);
+  await sleep(4000);
   return true;
 }
 
@@ -160,23 +161,26 @@ async function injectMessage(text) {
   messageBox.click();
   messageBox.focus();
   
-  // Check if text is already there (e.g. from web.whatsapp.com/send?text=...)
+  // Check if text is already there (e.g. from api.whatsapp.com/send?text=...)
   // We check if the box is effectively empty or just has placeholder
   const currentText = (messageBox.innerText || messageBox.textContent || "").trim();
-  const isPlaceholder = messageBox.getAttribute('data-placeholder') === currentText;
+  const placeholder = messageBox.getAttribute('data-placeholder') || "";
+  const isPlaceholder = currentText === placeholder;
+  
+  console.log(`[WhatsApp Automation] Current text in box: "${currentText}"`);
   
   if (currentText.length < 2 || isPlaceholder) { 
     console.log("[WhatsApp Automation] Message box empty or placeholder, typing message...");
     // Clear first to be safe
     document.execCommand('selectAll', false, null);
     document.execCommand('delete', false, null);
-    await sleep(500);
+    await sleep(1000);
     
     document.execCommand('insertText', false, text);
     messageBox.dispatchEvent(new Event('input', { bubbles: true }));
-    await sleep(1000);
+    await sleep(1500);
   } else {
-    console.log("[WhatsApp Automation] Message box already has text: " + currentText.substring(0, 20) + "...");
+    console.log("[WhatsApp Automation] Message box already has text, skipping typing");
   }
 
   // Try clicking the send button first (more reliable than Enter key)

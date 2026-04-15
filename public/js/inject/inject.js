@@ -14,37 +14,88 @@
             request.onerror = () => reject(new Error(`Failed to open IndexedDB: ${dbName}`));
             request.onsuccess = (event) => {
                 const db = event.target.result;
-                // Try to find the store even if the name is slightly different (common in WA updates)
-                const actualStoreName = db.objectStoreNames.contains(storeName) 
-                    ? storeName 
-                    : Array.from(db.objectStoreNames).find(name => name.toLowerCase().includes(storeName.toLowerCase()));
-                
-                if (!actualStoreName) {
-                    console.warn(`Store ${storeName} not found in ${dbName}. Available:`, Array.from(db.objectStoreNames));
+                if (!db.objectStoreNames.contains(storeName)) {
                     return resolve([]);
                 }
-                const transaction = db.transaction(actualStoreName, "readonly");
-                const store = transaction.objectStore(actualStoreName);
+                const transaction = db.transaction(storeName, "readonly");
+                const store = transaction.objectStore(storeName);
                 const getAllRequest = store.getAll();
                 getAllRequest.onsuccess = () => {
                     resolve(getAllRequest.result.filter(filterFn));
                 };
-                getAllRequest.onerror = () => reject(new Error(`Failed to get data from store: ${actualStoreName}`));
+                getAllRequest.onerror = () => reject(new Error(`Failed to get data from store: ${storeName}`));
             };
         });
     }
 
-    async function tryMultipleDBs(storeName, filterFn) {
-        const dbs = ["model-storage", "wawc-db", "lru-storage", "storage"];
-        for (const db of dbs) {
-            try {
-                const results = await getFromIndexedDB(db, storeName, filterFn);
-                if (results && results.length > 0) return results;
-            } catch (e) {
-                console.warn(`DB ${db} check failed:`, e.message);
-            }
+    async function getGroupsFromDB() {
+        try {
+            const rows = await getFromIndexedDB("model-storage", "group-metadata");
+            return rows.map(row => ({
+                id: row.id,
+                subject: row.subject || row.name || "Unknown Group",
+                isGroup: true
+            }));
+        } catch (e) {
+            console.error("Group extraction failed:", e);
+            return [];
         }
-        return [];
+    }
+
+    async function scrapeGroupMembersFromDB(groupId) {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open("model-storage");
+            request.onerror = () => reject(new Error("Failed to open model-storage"));
+            request.onsuccess = async (event) => {
+                const db = event.target.result;
+                try {
+                    const tx = db.transaction(["group-metadata", "participant", "contact"], "readonly");
+                    const groupStore = tx.objectStore("group-metadata");
+                    const participantStore = tx.objectStore("participant");
+                    const contactStore = tx.objectStore("contact");
+
+                    const groupReq = groupStore.get(groupId);
+                    const allParticipantsReq = participantStore.getAll();
+
+                    groupReq.onsuccess = () => {
+                        const group = groupReq.result;
+                        allParticipantsReq.onsuccess = async () => {
+                            const participantRows = allParticipantsReq.result || [];
+                            const participantRecord = participantRows.find(r => r.groupId === groupId || r.id === groupId);
+
+                            if (!participantRecord || !Array.isArray(participantRecord.participants)) {
+                                return resolve([]);
+                            }
+
+                            const results = [];
+                            for (const lid of participantRecord.participants) {
+                                // We can't do await inside onsuccess easily without more promises
+                                // So we'll collect all keys and do a bulk get if possible, or just another promise
+                            }
+                            
+                            // Better way: get all contacts and filter
+                            const allContactsReq = contactStore.getAll();
+                            allContactsReq.onsuccess = () => {
+                                const allContacts = allContactsReq.result || [];
+                                const contactMap = new Map(allContacts.map(c => [c.id, c]));
+                                
+                                const finalMembers = participantRecord.participants.map(lid => {
+                                    const c = contactMap.get(lid);
+                                    return {
+                                        id: lid,
+                                        name: c?.name || c?.pushname || "Unknown",
+                                        phone: c?.phoneNumber ? String(c.phoneNumber).replace(/@c\.us$/, "") : lid.split('@')[0]
+                                    };
+                                });
+                                resolve(finalMembers);
+                            };
+                        };
+                    };
+                } catch (e) {
+                    reject(e);
+                }
+            };
+        });
     }
 
     window.addEventListener("message", async (event) => {
@@ -66,7 +117,6 @@
                     await window.WPP.chat.open(chatId);
                     window.postMessage({ type: "WA_OPEN_CHAT_RESULT", requestId, success: true, phone }, "*");
                 } else {
-                    // Fallback: Signal to content script to use DOM-based search
                     window.postMessage({ type: "WA_OPEN_CHAT_RESULT", requestId, success: false, error: "Internal API missing. Using DOM fallback.", useFallback: true, phone }, "*");
                 }
             } catch (err) {
@@ -82,14 +132,8 @@
                 } else if (window.BULK_WPP && window.BULK_WPP.group && window.BULK_WPP.group.getAllMine) {
                     groups = await window.BULK_WPP.group.getAllMine();
                 } else {
-                    // Fallback to IndexedDB with multiple possible store names
-                    console.log("WhatsApp Automation: Falling back to IndexedDB for groups");
-                    const chats = await tryMultipleDBs("chat", (c) => c.id && c.id.includes("@g.us"));
-                    groups = chats.map(c => ({
-                        id: c.id,
-                        subject: c.name || c.formattedTitle || c.subject || c.title || "Unknown Group",
-                        isGroup: true
-                    }));
+                    console.log("WhatsApp Automation: Using user-provided DB logic for groups");
+                    groups = await getGroupsFromDB();
                 }
                 window.postMessage({ type: "WA_GET_GROUPS_RESULT", requestId, success: true, data: groups }, "*");
             } catch (err) {
@@ -107,20 +151,8 @@
                 } else if (window.BULK_WPP && window.BULK_WPP.group && window.BULK_WPP.group.getParticipants) {
                     members = await window.BULK_WPP.group.getParticipants(chatId);
                 } else {
-                    // Fallback to IndexedDB
-                    console.log("WhatsApp Automation: Falling back to IndexedDB for group members");
-                    const groupMetadata = await tryMultipleDBs("group-metadata", (g) => g.id === chatId);
-                    if (groupMetadata && groupMetadata.length > 0) {
-                        members = groupMetadata[0].participants || [];
-                    } else {
-                        // Try fetching from chat store as fallback
-                        const chats = await tryMultipleDBs("chat", (c) => c.id === chatId);
-                        if (chats && chats.length > 0 && (chats[0].groupMetadata || chats[0].participants)) {
-                            members = (chats[0].groupMetadata ? chats[0].groupMetadata.participants : chats[0].participants) || [];
-                        } else {
-                            throw new Error("Group metadata not found in IndexedDB. Please open the group manually once.");
-                        }
-                    }
+                    console.log("WhatsApp Automation: Using user-provided DB logic for scraping");
+                    members = await scrapeGroupMembersFromDB(chatId);
                 }
                 window.postMessage({ type: "WA_SCRAPE_GROUP_RESULT", requestId, success: true, data: members }, "*");
             } catch (err) {
@@ -136,13 +168,12 @@
                 } else if (window.BULK_WPP && window.BULK_WPP.contact && window.BULK_WPP.contact.list) {
                     contacts = await window.BULK_WPP.contact.list();
                 } else {
-                    // Fallback to IndexedDB
-                    console.log("WhatsApp Automation: Falling back to IndexedDB for contacts");
-                    const allContacts = await tryMultipleDBs("contact", (c) => c.id && c.id.includes("@c.us"));
-                    contacts = allContacts.map(c => ({
+                    console.log("WhatsApp Automation: Falling back to contact store");
+                    const rows = await getFromIndexedDB("model-storage", "contact");
+                    contacts = rows.map(c => ({
                         id: c.id,
-                        name: c.name || c.pushname || c.formattedName || c.shortName || c.verifiedName || "Unknown",
-                        phone: c.id.split('@')[0]
+                        name: c.name || c.pushname || "Unknown",
+                        phone: c.phoneNumber ? String(c.phoneNumber).replace(/@c\.us$/, "") : c.id.split('@')[0]
                     }));
                 }
                 window.postMessage({ type: "WA_GET_CONTACTS_RESULT", requestId, success: true, data: contacts }, "*");
