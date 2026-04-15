@@ -6,7 +6,7 @@
     if (window._WA_INJECT_LOADED) return;
     window._WA_INJECT_LOADED = true;
 
-    console.log("[WA-INJECT] MAIN world script initialized");
+    console.log("WhatsApp Automation Initialized");
 
     window.addEventListener("message", async (event) => {
         if (event.source !== window) return;

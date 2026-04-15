@@ -695,7 +695,7 @@ export default function App() {
               <MessageSquare className="w-8 h-8 text-green-600" />
               WhatsApp Automation
             </h1>
-            <p className="text-slate-500 mt-1">Professional bulk messaging with DOM-based automation.</p>
+            <p className="text-slate-500 mt-1">Bulk messaging with DOM-based automation.</p>
           </div>
           
           <div className="flex items-center gap-2">

@@ -1,5 +1,5 @@
 // content-script.js
-console.log("WhatsApp Automation: Content Script Loaded");
+console.log("WhatsApp Automation Loaded");
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 

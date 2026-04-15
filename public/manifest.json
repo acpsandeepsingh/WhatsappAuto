@@ -15,18 +15,16 @@
    } ],
    "default_locale": "en",
    "description": "__MSG_description__",
-   "homepage_url": "https://wawebsender.com/",
    "host_permissions": [ "*://*.whatsapp.com/*" ],
    "icons": {
       "128": "icons/128.png"
    },
-   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAhdYLwWoDZdr3ktfG/DRQiUTqRnGvvN7sblMdL14GWQe5aSaDn51RwFTcVWpeCRCdHfa760Rdp4bWQfjR9pJqJCXPaRYR4MSmxI07PQts8uHzf2G2ZI1Qgduf/mnxgJaA5m8YcLmpALm8pQGVDeJdnolwI2Fa87Uh2X9ixhV6OVTZXAMGsC3gFf8L72gUVvG5pA/FtCzWQyaAkb54NVv3gFVjD4YOac+p+A7WqFW4vNbVcyDRTKVRlzbhhMDCqUZtmViTokpTq1NMp/8BFv/1a1ULb4ZzpHCKNOsow+NPcSMABSfmM/nlDuS2UR4Ma024Xv1wGZVfT68HgMKXNv9xfwIDAQAB",
    "manifest_version": 3,
    "name": "__MSG_name__",
+   "options_page": "index.html",
    "optional_host_permissions": [ "*://*/*" ],
    "permissions": [ "activeTab", "storage", "unlimitedStorage", "scripting", "alarms" ],
-   "update_url": "https://clients2.google.com/service/update2/crx",
-   "version": "1.2.83",
+   "version": "1.0.0",
    "web_accessible_resources": [ {
       "matches": [ "*://*.whatsapp.com/*" ],
       "resources": [ "js/inject/inject.js", "WAPlusSenderTemplate.xlsx", "pic/crm-commend.png", "li-popup/li-popup.html", "js/inject/obfuscate.js", "fonts/*", "css/*", "images/*" ]

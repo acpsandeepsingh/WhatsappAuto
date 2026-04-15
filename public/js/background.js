@@ -5,7 +5,7 @@ let status = 'idle';
 let settings = {};
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log("WhatsApp Automation Extension Installed");
+  console.log("WhatsApp Automation Installed");
 });
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {

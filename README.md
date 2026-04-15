@@ -1,6 +1,6 @@
-# WhatsApp Automation Extension
+# WhatsApp Automation
 
-Professional WhatsApp automation with DOM-based sending and queue management.
+WhatsApp automation with DOM-based sending and queue management.
 
 ## 🚀 GitHub Automation (CI/CD)
 This project is configured with **GitHub Actions**. Every time you push code to the `main` or `master` branch:

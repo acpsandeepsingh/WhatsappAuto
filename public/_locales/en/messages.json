@@ -1,8 +1,8 @@
 {
   "name": {
-    "message": "WA Bulk Message Sender"
+    "message": "WhatsApp Automation"
   },
   "description": {
-    "message": "Send bulk messages on WhatsApp Web automatically."
+    "message": "WhatsApp automation with DOM-based sending and queue management."
   }
 }

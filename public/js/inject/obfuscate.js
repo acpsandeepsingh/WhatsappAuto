@@ -1,3 +1,3 @@
 // js/inject/obfuscate.js
 // Placeholder for obfuscation logic
-console.log("WhatsApp Automation: Obfuscator ready");
+console.log("WhatsApp Automation Ready");
