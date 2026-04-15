@@ -197,7 +197,7 @@ async function injectMessage(text) {
     
     document.execCommand('insertText', false, text);
     messageBox.dispatchEvent(new Event('input', { bubbles: true }));
-    await sleep(1500);
+    await sleep(2500);
   } else {
     console.log("[WhatsApp Automation] Message box already has text, skipping typing");
   }
