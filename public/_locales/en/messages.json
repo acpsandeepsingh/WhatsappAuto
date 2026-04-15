@@ -1,8 +1,0 @@
-{
-  "name": {
-    "message": "WhatsApp Automation"
-  },
-  "description": {
-    "message": "WhatsApp automation with DOM-based sending and queue management."
-  }
-}

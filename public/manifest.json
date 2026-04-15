@@ -1,8 +1,5 @@
 {
    "action": {
-      "default_icon": {
-         "128": "icons/128.png"
-      },
       "default_popup": "popup.html"
    },
    "background": {
@@ -13,20 +10,16 @@
       "matches": [ "*://*.whatsapp.com/*" ],
       "run_at": "document_end"
    } ],
-   "default_locale": "en",
-   "description": "__MSG_description__",
+   "description": "WhatsApp automation with DOM-based sending and queue management.",
    "host_permissions": [ "*://*.whatsapp.com/*" ],
-   "icons": {
-      "128": "icons/128.png"
-   },
    "manifest_version": 3,
-   "name": "__MSG_name__",
+   "name": "WhatsApp Automation",
    "options_page": "index.html",
    "optional_host_permissions": [ "*://*/*" ],
    "permissions": [ "activeTab", "storage", "unlimitedStorage", "scripting", "alarms" ],
    "version": "1.0.0",
    "web_accessible_resources": [ {
       "matches": [ "*://*.whatsapp.com/*" ],
-      "resources": [ "js/inject/inject.js", "WAPlusSenderTemplate.xlsx", "pic/crm-commend.png", "li-popup/li-popup.html", "js/inject/obfuscate.js", "fonts/*", "css/*", "images/*" ]
+      "resources": [ "js/inject/inject.js", "js/inject/obfuscate.js" ]
    } ]
 }

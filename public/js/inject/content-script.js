@@ -46,51 +46,38 @@ async function smartWait(selector, fallbackDelay) {
   return null;
 }
 
-async function searchAndOpenChat(phone) {
-  const searchBox = await waitForElement(SELECTORS.searchBox);
-  if (!searchBox) throw new Error("Search box not found");
-
-  searchBox.focus();
-  document.execCommand('selectAll', false, null);
-  document.execCommand('delete', false, null);
-  document.execCommand('insertText', false, phone);
-  searchBox.dispatchEvent(new Event('input', { bubbles: true }));
-
-  await smartWait('div[aria-label="Search results."] div._ak8o', automationSettings.searchDelay);
-
-  const resultCell = document.querySelector('div[aria-label="Search results."] div[role="gridcell"][aria-colindex="2"]._ak8o');
-  if (resultCell) {
-    resultCell.click();
-    await smartWait(SELECTORS.messageBox, automationSettings.openChatDelay);
-    return true;
-  }
-
-  const fallbackCell = document.querySelector('div[aria-label="Search results."] div._ak8o');
-  if (fallbackCell) {
-    fallbackCell.click();
-    await smartWait(SELECTORS.messageBox, automationSettings.openChatDelay);
-    return true;
-  }
-
-  const newChatBtn = await waitForElement(SELECTORS.newChatBtn);
-  if (newChatBtn) {
-    newChatBtn.click();
-    await smartWait(SELECTORS.newChatSearch, 2000);
-    const newChatSearch = await waitForElement(SELECTORS.newChatSearch);
-    if (newChatSearch) {
-      newChatSearch.focus();
-      document.execCommand('insertText', false, phone);
-      newChatSearch.dispatchEvent(new Event('input', { bubbles: true }));
-      await smartWait('div[aria-label="Search results"] div._ak8o', automationSettings.searchDelay);
-      const newChatResult = document.querySelector('div[aria-label="Search results"] div._ak8o');
-      if (newChatResult) {
-        newChatResult.click();
-        await smartWait(SELECTORS.messageBox, automationSettings.openChatDelay);
-        return true;
-      }
+async function searchAndOpenChat(phone, message = "") {
+  console.log(`[WhatsApp Automation] Opening chat for: ${phone}`);
+  
+  if (phone.includes('@g.us')) {
+    // It's a group, use the internal API via the injected script
+    window.postMessage({ type: "WA_OPEN_CHAT", phone: phone, requestId: Date.now() }, "*");
+    
+    // Wait for the chat to actually load
+    const messageBox = await waitForElement(SELECTORS.messageBox, 20000);
+    if (!messageBox) {
+      throw new Error("Group message box not found. Make sure you are a member of the group.");
     }
+    return true;
   }
-  throw new Error(`Contact ${phone} not found`);
+
+  // Use the requested logic to open chat via api.whatsapp.com without full redirect
+  const number = phone.replace(/\D/g, "");
+  const text = encodeURIComponent(message);
+  
+  const a = document.createElement("a");
+  a.href = `https://api.whatsapp.com/send?phone=${number}&text=${text}`;
+  a.target = "_self";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+
+  // Wait for the chat to actually load
+  const messageBox = await waitForElement(SELECTORS.messageBox, 20000);
+  if (!messageBox) {
+    throw new Error("Message box not found after opening chat. Please ensure you are logged in to WhatsApp Web.");
+  }
+  return true;
 }
 
 async function injectMessage(text) {
@@ -152,7 +139,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       try {
         const { phone, message, attachment } = request.data;
         if (request.settings) automationSettings = { ...automationSettings, ...request.settings };
-        await searchAndOpenChat(phone);
+        await searchAndOpenChat(phone, message);
         if (attachment) await handleAttachment(attachment, message);
         else await injectMessage(message);
         sendResponse({ success: true });

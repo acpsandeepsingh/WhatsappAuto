@@ -122,10 +122,7 @@ export default function App() {
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [groupSearchTerm, setGroupSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'contacts' | 'groups' | 'scraping' | 'quick'>('contacts');
-  const [quickPhone, setQuickPhone] = useState('');
-  const [quickMessage, setQuickMessage] = useState('');
-  const [isSendingQuick, setIsSendingQuick] = useState(false);
+  const [activeTab, setActiveTab] = useState<'contacts' | 'groups' | 'scraping'>('contacts');
   const [isScraping, setIsScraping] = useState(false);
   const [openingChatId, setOpeningChatId] = useState<string | null>(null);
   const [queueStatus, setQueueStatus] = useState<'idle' | 'running' | 'paused' | 'stopped'>('idle');
@@ -275,43 +272,6 @@ export default function App() {
         toast.error("Failed to execute direct open command");
       }
       setOpeningChatId(null);
-    }
-  };
-
-  const handleQuickSend = async () => {
-    if (!quickPhone) {
-      toast.error("Please enter a phone number");
-      return;
-    }
-    setIsSendingQuick(true);
-    try {
-      if (typeof chrome !== 'undefined' && chrome.runtime) {
-        chrome.runtime.sendMessage({
-          action: "process_row",
-          data: {
-            phone: quickPhone,
-            message: quickMessage
-          }
-        }, (response: any) => {
-          if (response?.success) {
-            toast.success("Message sent successfully");
-            setQuickPhone('');
-            setQuickMessage('');
-          } else {
-            toast.error(response?.error || "Failed to send message");
-          }
-          setIsSendingQuick(false);
-        });
-      } else {
-        toast.info("Extension not detected. Opening WhatsApp API link...");
-        const number = quickPhone.replace(/\D/g, "");
-        const text = encodeURIComponent(quickMessage);
-        window.open(`https://api.whatsapp.com/send?phone=${number}&text=${text}`, '_blank');
-        setIsSendingQuick(false);
-      }
-    } catch (error) {
-      toast.error("An error occurred");
-      setIsSendingQuick(false);
     }
   };
 
@@ -767,75 +727,7 @@ export default function App() {
           >
             Scraping Tools
           </button>
-          <button 
-            onClick={() => setActiveTab('quick')}
-            className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'quick' ? 'border-green-600 text-green-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
-          >
-            Quick Send
-          </button>
         </div>
-
-        {activeTab === 'quick' && (
-          <div className="p-6 space-y-6">
-            <Card className="border-none shadow-sm">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Send className="w-5 h-5 text-green-600" />
-                  Quick Send
-                </CardTitle>
-                <CardDescription>
-                  Send a single message to any number instantly. No need to add to contacts or queue.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="quick-phone">Phone Number</Label>
-                    <Input 
-                      id="quick-phone" 
-                      placeholder="e.g. 919876543210 (with country code)" 
-                      value={quickPhone}
-                      onChange={(e) => setQuickPhone(e.target.value)}
-                    />
-                    <p className="text-xs text-slate-500">Always include the country code without + or 00.</p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="quick-message">Message</Label>
-                    <Textarea 
-                      id="quick-message" 
-                      placeholder="Type your message here..." 
-                      className="min-h-[100px]"
-                      value={quickMessage}
-                      onChange={(e) => setQuickMessage(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-end">
-                  <Button 
-                    onClick={handleQuickSend}
-                    disabled={isSendingQuick || !quickPhone}
-                    className="bg-green-600 hover:bg-green-700 text-white gap-2 px-8"
-                  >
-                    {isSendingQuick ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Send className="w-4 h-4" />
-                    )}
-                    Send Now
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 flex gap-3">
-              <Info className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
-              <div className="text-sm text-blue-800">
-                <p className="font-medium mb-1">How it works</p>
-                <p>This tool uses the extension's automation engine to open the chat and type the message for you. If the extension is not active, it will fall back to the official WhatsApp API link.</p>
-              </div>
-            </div>
-          </div>
-        )}
 
         {activeTab === 'contacts' && (
           <>
