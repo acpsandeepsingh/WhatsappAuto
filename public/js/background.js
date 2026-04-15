@@ -31,6 +31,30 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  // Proxy actions to content script
+  if (["GET_GROUPS", "FETCH_CONTACTS", "SCRAPE_GROUP"].includes(request.action)) {
+    chrome.tabs.query({ url: "*://*.whatsapp.com/*" }, (tabs) => {
+      if (tabs.length > 0) {
+        // Map action names if necessary
+        let contentAction = request.action;
+        if (request.action === "GET_GROUPS") contentAction = "get_groups";
+        if (request.action === "SCRAPE_GROUP") contentAction = "scrape_group";
+        if (request.action === "FETCH_CONTACTS") contentAction = "fetch_contacts";
+
+        chrome.tabs.sendMessage(tabs[0].id, { ...request, action: contentAction }, (res) => {
+          if (chrome.runtime.lastError) {
+            sendResponse({ success: false, error: "Content script not responding" });
+          } else {
+            sendResponse(res);
+          }
+        });
+      } else {
+        sendResponse({ success: false, error: "WhatsApp not open" });
+      }
+    });
+    return true;
+  }
+
   if (request.action === "start_queue") {
     queue = request.contacts || [];
     settings = request.settings || {};

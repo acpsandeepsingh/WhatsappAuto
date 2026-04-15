@@ -9,7 +9,7 @@ const SELECTORS = {
   chatRow: '[role="row"]',
   messageBox: 'footer div[contenteditable="true"][data-tab="10"], div.lexical-rich-text-input div[contenteditable="true"]',
   captionBox: 'div.x1hx0egp.x6ikm8r.x1odjw0f[role="textbox"], [label="Type a message"], div[contenteditable="true"][data-placeholder="Add a caption"], div[contenteditable="true"].lexical-rich-text-input, div[aria-label="Add a caption"], div[data-tab="10"][contenteditable="true"]',
-  sendBtn: 'span[data-icon="send"], span[data-icon="wds-ic-send-filled"], button[aria-label="Send"], div[role="button"] span[data-icon="send"]',
+  sendBtn: 'span[data-icon="send"], span[data-icon="wds-ic-send-filled"], button[aria-label="Send"], div[role="button"] span[data-icon="send"], button span[data-icon="send"]',
   attachBtn: 'button[data-tab="10"][aria-label="Attach"]',
   fileInputs: 'input[type="file"]',
   newChatBtn: 'button[aria-label="New chat"], span[data-icon="new-chat-outline"]',
@@ -23,6 +23,28 @@ let automationSettings = {
   sendDelay: 2000,
   useSmartWait: true
 };
+
+async function callInjected(type, data = {}) {
+  return new Promise((resolve, reject) => {
+    const requestId = Date.now() + Math.random();
+    const listener = (event) => {
+      if (event.source !== window || !event.data || event.data.requestId !== requestId) return;
+      if (event.data.type === `${type}_RESULT`) {
+        window.removeEventListener("message", listener);
+        if (event.data.success) resolve(event.data);
+        else reject(new Error(event.data.error || "Action failed"));
+      }
+    };
+    window.addEventListener("message", listener);
+    window.postMessage({ type, requestId, ...data }, "*");
+    
+    // Timeout after 30 seconds
+    setTimeout(() => {
+      window.removeEventListener("message", listener);
+      reject(new Error("Request timed out"));
+    }, 30000);
+  });
+}
 
 async function waitForElement(selector, timeout = 15000) {
   const start = Date.now();
@@ -51,7 +73,7 @@ async function searchAndOpenChat(phone, message = "") {
   
   if (phone.includes('@g.us')) {
     // It's a group, use the internal API via the injected script
-    window.postMessage({ type: "WA_OPEN_CHAT", phone: phone, requestId: Date.now() }, "*");
+    await callInjected("WA_OPEN_CHAT", { phone });
     
     // Wait for the chat to actually load
     const messageBox = await waitForElement(SELECTORS.messageBox, 20000);
@@ -90,7 +112,7 @@ async function injectMessage(text) {
   
   // Check if text is already there (e.g. from api.whatsapp.com/send?text=...)
   const currentText = messageBox.innerText || messageBox.textContent || "";
-  if (!currentText.includes(text.substring(0, 10))) { 
+  if (!currentText.includes(text.substring(0, 5))) { 
     // Only type if it's not already there or looks different
     document.execCommand('selectAll', false, null);
     document.execCommand('delete', false, null);
@@ -100,14 +122,34 @@ async function injectMessage(text) {
   }
 
   // Try clicking the send button first (more reliable than Enter key)
-  const sendBtn = await waitForElement(SELECTORS.sendBtn, 5000);
+  let sendBtn = null;
+  for (let i = 0; i < 10; i++) { // Increase attempts
+    sendBtn = document.querySelector(SELECTORS.sendBtn);
+    if (sendBtn) {
+      // If we found a span/icon, try to find the clickable parent button
+      const parentButton = sendBtn.closest('button') || sendBtn.closest('[role="button"]');
+      if (parentButton) sendBtn = parentButton;
+      break;
+    }
+    await sleep(500);
+  }
+
   if (sendBtn) {
     console.log("[WhatsApp Automation] Clicking send button");
     sendBtn.click();
+    
+    // Sometimes a single click isn't enough or needs a small delay
+    await sleep(500);
+    if (document.querySelector(SELECTORS.sendBtn)) {
+       // If button still exists, try one more time or use Enter
+       sendBtn.click();
+    }
   } else {
     console.log("[WhatsApp Automation] Send button not found, trying Enter key");
     const eventOptions = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
     messageBox.dispatchEvent(new KeyboardEvent('keydown', eventOptions));
+    messageBox.dispatchEvent(new KeyboardEvent('keypress', eventOptions));
+    messageBox.dispatchEvent(new KeyboardEvent('keyup', eventOptions));
   }
   
   await sleep(automationSettings.sendDelay);
@@ -137,7 +179,7 @@ async function handleAttachment(attachment, caption = "") {
     }
   }
 
-  const sendBtn = await waitForElement('button[aria-label="Send"], span[data-icon="send"]');
+  const sendBtn = await waitForElement(SELECTORS.sendBtn, 5000);
   if (sendBtn) {
     sendBtn.click();
     await sleep(automationSettings.sendDelay);
@@ -151,6 +193,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ success: true });
     return true;
   }
+
+  if (request.action === "get_groups") {
+    callInjected("WA_GET_GROUPS")
+      .then(res => sendResponse({ success: true, groups: res.data }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "scrape_group") {
+    callInjected("WA_SCRAPE_GROUP", { phone: request.groupId || request.groupName })
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "fetch_contacts") {
+    // This is often used for fast fetching from IndexedDB or sidebar
+    // We'll try to use the injected API if available, otherwise fallback to a generic message
+    callInjected("WA_GET_CONTACTS", { filter: request.filter })
+      .then(res => sendResponse(res))
+      .catch(err => {
+        // If WA_GET_CONTACTS is not implemented in inject.js, we can try a basic scrape or just return error
+        sendResponse({ success: false, error: "Fast fetch not available. Try UI scrape." });
+      });
+    return true;
+  }
+
   if (request.action === "process_row") {
     (async () => {
       try {
