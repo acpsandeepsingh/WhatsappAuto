@@ -95,6 +95,7 @@ interface AppSettings {
   useSmartWait: boolean;
   useDirectOpen: boolean;
   autoStartTime?: string; // ISO string or empty
+  autoStartEnabled?: boolean;
   attachment?: {
     name: string;
     dataUrl: string;
@@ -113,7 +114,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   sendDelay: 1000,
   useSmartWait: true,
   useDirectOpen: true,
-  autoStartTime: ""
+  autoStartTime: "",
+  autoStartEnabled: false
 };
 
 /**
@@ -206,7 +208,7 @@ export default function App() {
 
   // Auto-start logic
   useEffect(() => {
-    if (!settings.autoStartTime || queueStatus !== 'idle') return;
+    if (!settings.autoStartTime || !settings.autoStartEnabled || queueStatus !== 'idle') return;
 
     const timer = setInterval(() => {
       const now = new Date();
@@ -215,14 +217,14 @@ export default function App() {
       if (now >= scheduledTime) {
         console.log("[App] Auto-start triggered");
         startQueue();
-        // Clear the auto-start time after triggering to prevent repeated starts
-        setSettings(prev => ({ ...prev, autoStartTime: "" }));
+        // Disable auto-start after triggering
+        setSettings(prev => ({ ...prev, autoStartEnabled: false }));
         clearInterval(timer);
       }
     }, 10000); // Check every 10 seconds
 
     return () => clearInterval(timer);
-  }, [settings.autoStartTime, queueStatus, contacts]);
+  }, [settings.autoStartTime, settings.autoStartEnabled, queueStatus, contacts]);
 
   const filteredContacts = useMemo(() => {
     return contacts.filter(c => 
@@ -237,7 +239,7 @@ export default function App() {
     );
   }, [groups, groupSearchTerm]);
 
-  const openDirectChat = (phone: string) => {
+  const openDirectChat = (phone: string, sendDraft = false) => {
     if (!phone) {
       toast.error("Contact ID/Phone is required");
       return;
@@ -248,16 +250,22 @@ export default function App() {
     setOpeningChatId(target);
     
     if (typeof chrome !== 'undefined' && chrome.runtime) {
+      // Find the contact to get the message
+      const contact = contacts.find(c => c.phone === phone);
+      const message = sendDraft && contact ? parseTemplate(contact.message_template, contact) : "";
+
       chrome.runtime.sendMessage({ 
         action: "OPEN_CHAT", 
         phone: target,
+        message: message,
+        sendImmediately: sendDraft,
         useDirectMethod: true // Signal to use WPP.chat.open or similar
       }, (response) => {
         setOpeningChatId(null);
         if (response && !response.success) {
           toast.error(response.error || "Failed to open chat");
         } else {
-          toast.success("Chat opened successfully");
+          toast.success(sendDraft ? "Message sent successfully" : "Chat opened successfully");
         }
       });
     } else {
@@ -926,6 +934,16 @@ export default function App() {
                                 <Button 
                                   variant="ghost" 
                                   size="icon" 
+                                  className="opacity-0 group-hover:opacity-100 text-green-500 hover:text-green-600"
+                                  onClick={() => openDirectChat(contact.phone, true)}
+                                  title="Send Drafted Message"
+                                  disabled={openingChatId === contact.phone}
+                                >
+                                  <Send className="w-4 h-4" />
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
                                   className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500"
                                   onClick={() => setContacts(contacts.filter(c => c.id !== contact.id))}
                                 >
@@ -955,40 +973,40 @@ export default function App() {
                 <CardDescription>Configure the message and attachment for this campaign.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="campaign-msg">Default Message Template</Label>
-                  <Textarea 
-                    id="campaign-msg"
-                    placeholder="Type your message here... Use {{name}} for personalization."
-                    value={settings.defaultTemplate}
-                    onChange={(e) => setSettings(prev => ({ ...prev, defaultTemplate: e.target.value }))}
-                    className="min-h-[100px] resize-y"
-                  />
-                  <p className="text-[10px] text-slate-400 italic">
-                    Placeholders: {"{{name}}"}, {"{{phone}}"}, {"{{sr_no}}"}
-                  </p>
-                </div>
-                
-                <div className="flex items-center gap-4">
-                  <div className="flex-1">
-                    <Label className="mb-2 block">Campaign Attachment</Label>
-                    {settings.attachment ? (
-                      <div className="flex items-center justify-between p-2 bg-slate-50 border rounded-md">
-                        <div className="flex items-center gap-2">
-                          <FileText className="w-4 h-4 text-blue-500" />
-                          <span className="text-sm font-medium truncate max-w-[200px]">{settings.attachment.name}</span>
+                <div className="flex flex-col md:flex-row gap-4">
+                  <div className="flex-1 space-y-2">
+                    <Label htmlFor="campaign-msg">Default Message Template</Label>
+                    <Textarea 
+                      id="campaign-msg"
+                      placeholder="Type your message here... Use {{name}} for personalization."
+                      value={settings.defaultTemplate}
+                      onChange={(e) => setSettings(prev => ({ ...prev, defaultTemplate: e.target.value }))}
+                      className="min-h-[100px] resize-y"
+                    />
+                    <p className="text-[10px] text-slate-400 italic">
+                      Placeholders: {"{{name}}"}, {"{{phone}}"}, {"{{sr_no}}"}
+                    </p>
+                  </div>
+                  
+                  <div className="w-full md:w-80 space-y-4 flex flex-col justify-between">
+                    <div className="space-y-2">
+                      <Label className="block">Campaign Attachment</Label>
+                      {settings.attachment ? (
+                        <div className="flex items-center justify-between p-2 bg-slate-50 border rounded-md">
+                          <div className="flex items-center gap-2">
+                            <FileText className="w-4 h-4 text-blue-500" />
+                            <span className="text-sm font-medium truncate max-w-[150px]">{settings.attachment.name}</span>
+                          </div>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => setSettings(prev => ({ ...prev, attachment: undefined }))}
+                            className="h-8 w-8 p-0 text-slate-400 hover:text-red-500"
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
                         </div>
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          onClick={() => setSettings(prev => ({ ...prev, attachment: undefined }))}
-                          className="h-8 w-8 p-0 text-slate-400 hover:text-red-500"
-                        >
-                          <X className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2">
+                      ) : (
                         <Button 
                           variant="outline" 
                           onClick={() => {
@@ -1015,13 +1033,12 @@ export default function App() {
                           className="w-full border-dashed border-2 h-12 hover:bg-slate-50 hover:border-slate-300"
                         >
                           <Paperclip className="w-4 h-4 mr-2" />
-                          Attach File to Campaign
+                          Attach File
                         </Button>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex flex-col justify-end h-full pt-6">
-                    <Button onClick={startGroupCampaign} className="bg-green-600 hover:bg-green-700 text-white h-12 px-8">
+                      )}
+                    </div>
+                    
+                    <Button onClick={startGroupCampaign} className="bg-green-600 hover:bg-green-700 text-white h-12 w-full">
                       <Play className="w-4 h-4 mr-2" />
                       Start Campaign
                     </Button>
@@ -1048,8 +1065,17 @@ export default function App() {
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="flex items-center gap-4">
                     <CardTitle className="text-lg">Select Groups ({selectedGroups.length} selected)</CardTitle>
-                    <Button variant="ghost" size="sm" onClick={selectAllGroups}>
-                      {selectedGroups.length === groups.length ? "Deselect All" : "Select All"}
+                    <Button variant="ghost" size="sm" onClick={() => {
+                      const filteredIds = filteredGroups.map(g => g.id);
+                      const allFilteredSelected = filteredIds.every(id => selectedGroups.includes(id));
+                      
+                      if (allFilteredSelected) {
+                        setSelectedGroups(prev => prev.filter(id => !filteredIds.includes(id)));
+                      } else {
+                        setSelectedGroups(prev => Array.from(new Set([...prev, ...filteredIds])));
+                      }
+                    }}>
+                      {filteredGroups.every(g => selectedGroups.includes(g.id)) ? "Deselect Filtered" : "Select Filtered"}
                     </Button>
                   </div>
                   <div className="relative w-full md:w-80">
@@ -1316,13 +1342,25 @@ export default function App() {
                       <RefreshCw className="w-3 h-3" />
                       Auto Start Time
                     </Label>
-                    <Input 
-                      type="datetime-local" 
-                      value={settings.autoStartTime || ""} 
-                      onChange={(e) => setSettings({...settings, autoStartTime: e.target.value})}
-                      className="h-8 bg-white"
-                    />
-                    <p className="text-[10px] text-blue-600">Automation will start automatically at this time.</p>
+                    <div className="flex gap-2">
+                      <Input 
+                        type="datetime-local" 
+                        value={settings.autoStartTime || ""} 
+                        onChange={(e) => setSettings({...settings, autoStartTime: e.target.value})}
+                        className="h-8 bg-white flex-1"
+                      />
+                      <Button 
+                        size="sm" 
+                        variant={settings.autoStartEnabled ? "destructive" : "default"}
+                        className="h-8 px-3"
+                        onClick={() => setSettings(prev => ({ ...prev, autoStartEnabled: !prev.autoStartEnabled }))}
+                      >
+                        {settings.autoStartEnabled ? "Stop" : "Start"}
+                      </Button>
+                    </div>
+                    <p className="text-[10px] text-blue-600">
+                      {settings.autoStartEnabled ? "Auto-start is ACTIVE" : "Automation will start automatically at this time if enabled."}
+                    </p>
                   </div>
                 </div>
 

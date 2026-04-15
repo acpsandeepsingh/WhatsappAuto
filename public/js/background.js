@@ -9,47 +9,43 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === "CHECK_CONNECTION") {
+  if (request.action === "CHECK_CONNECTION" || request.action === "GET_GROUPS" || request.action === "FETCH_CONTACTS" || request.action === "SCRAPE_GROUP") {
     chrome.tabs.query({ url: "*://*.whatsapp.com/*" }, (tabs) => {
       if (tabs.length > 0) {
-        chrome.tabs.sendMessage(tabs[0].id, { action: "PING" }, (res) => {
+        const targetTab = tabs[0];
+        chrome.tabs.sendMessage(targetTab.id, { action: "PING" }, (res) => {
           if (chrome.runtime.lastError || !res) {
-            sendResponse({ success: false, error: "WhatsApp is open but content script is not responding. Please refresh WhatsApp." });
+            // Tab exists but content script not responding, refresh it
+            chrome.tabs.reload(targetTab.id, {}, () => {
+              sendResponse({ success: false, error: "WhatsApp tab was stale and is being refreshed. Please try again in a few seconds." });
+            });
           } else {
-            sendResponse({ success: true });
+            // If it's just a connection check, we're done
+            if (request.action === "CHECK_CONNECTION") {
+              sendResponse({ success: true });
+              return;
+            }
+
+            // Otherwise proxy the specific action
+            let contentAction = request.action;
+            if (request.action === "GET_GROUPS") contentAction = "get_groups";
+            if (request.action === "SCRAPE_GROUP") contentAction = "scrape_group";
+            if (request.action === "FETCH_CONTACTS") contentAction = "fetch_contacts";
+
+            chrome.tabs.sendMessage(targetTab.id, { ...request, action: contentAction }, (res) => {
+              if (chrome.runtime.lastError) {
+                sendResponse({ success: false, error: "Content script not responding" });
+              } else {
+                sendResponse(res);
+              }
+            });
           }
         });
       } else {
-        sendResponse({ success: false, error: "WhatsApp Web is not open. Please open web.whatsapp.com" });
-      }
-    });
-    return true;
-  }
-
-  if (request.action === "GET_STATUS") {
-    sendResponse({ status, currentIndex });
-    return true;
-  }
-
-  // Proxy actions to content script
-  if (["GET_GROUPS", "FETCH_CONTACTS", "SCRAPE_GROUP"].includes(request.action)) {
-    chrome.tabs.query({ url: "*://*.whatsapp.com/*" }, (tabs) => {
-      if (tabs.length > 0) {
-        // Map action names if necessary
-        let contentAction = request.action;
-        if (request.action === "GET_GROUPS") contentAction = "get_groups";
-        if (request.action === "SCRAPE_GROUP") contentAction = "scrape_group";
-        if (request.action === "FETCH_CONTACTS") contentAction = "fetch_contacts";
-
-        chrome.tabs.sendMessage(tabs[0].id, { ...request, action: contentAction }, (res) => {
-          if (chrome.runtime.lastError) {
-            sendResponse({ success: false, error: "Content script not responding" });
-          } else {
-            sendResponse(res);
-          }
+        // No WhatsApp tab found, open a new one
+        chrome.tabs.create({ url: "https://web.whatsapp.com" }, (newTab) => {
+          sendResponse({ success: false, error: "WhatsApp Web was not open. A new tab has been opened for you. Please log in and try again." });
         });
-      } else {
-        sendResponse({ success: false, error: "WhatsApp not open" });
       }
     });
     return true;
@@ -96,10 +92,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "GET_STATUS") {
+    sendResponse({ status, currentIndex });
+    return true;
+  }
+
   if (request.action === "OPEN_CHAT") {
     chrome.tabs.query({ url: "*://*.whatsapp.com/*" }, (tabs) => {
       if (tabs.length > 0) {
-        chrome.tabs.sendMessage(tabs[0].id, { action: "process_row", data: { phone: request.phone, message: "" } }, sendResponse);
+        chrome.tabs.sendMessage(tabs[0].id, { 
+          action: "process_row", 
+          data: { 
+            phone: request.phone, 
+            message: request.message || "",
+            name: request.name || ""
+          },
+          settings: {
+            ...settings,
+            sendImmediately: request.sendImmediately || false
+          }
+        }, sendResponse);
       } else {
         sendResponse({ success: false, error: "WhatsApp not open" });
       }

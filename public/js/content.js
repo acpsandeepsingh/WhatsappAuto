@@ -351,11 +351,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const { phone, message, attachment, name } = request.data;
         if (request.settings) automationSettings = { ...automationSettings, ...request.settings };
         await searchAndOpenChat(phone, message, name);
+        
+        // If we only wanted to open the chat (no message and not sendImmediately), we stop here
+        if (!message && !attachment && !request.settings?.sendImmediately) {
+          sendResponse({ success: true });
+          return;
+        }
+
         let status = "sent";
         if (attachment) {
           await handleAttachment(attachment, message);
           status = await verifyMessageSent();
-        } else {
+        } else if (message) {
           await injectMessage(message);
           status = await verifyMessageSent();
         }
