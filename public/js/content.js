@@ -24,7 +24,13 @@ const SELECTORS = {
   attachBtn: 'button[data-tab="10"][aria-label="Attach"]',
   fileInputs: 'input[type="file"]',
   newChatBtn: 'button[aria-label="New chat"], span[data-icon="new-chat-outline"]',
-  newChatSearch: 'div[role="textbox"][aria-label="Search name or number"], input[aria-label="Search name or number"]'
+  newChatSearch: 'div[role="textbox"][aria-label="Search name or number"], input[aria-label="Search name or number"]',
+  statusIcons: {
+    sent: 'span[data-icon="msg-check"][aria-label*="Sent"]',
+    delivered: 'span[data-icon="msg-dblcheck"][aria-label*="Delivered"]',
+    read: 'span[data-icon="msg-dblcheck"][aria-label*="Read"]'
+  },
+  lastMessage: 'div.message-out:last-child, [data-testid="msg-container"]:last-child'
 };
 
 let automationSettings = {
@@ -234,7 +240,35 @@ async function injectMessage(text) {
   }
   
   await sleep(automationSettings.sendDelay);
-  return true;
+  
+  // Verification step: Wait for the message to actually leave the box and show a status icon
+  const sent = await verifyMessageSent();
+  return sent;
+}
+
+async function verifyMessageSent() {
+  console.log("[WhatsApp Automation] Verifying message status...");
+  // Wait up to 15 seconds for a status icon to appear on the last outgoing message
+  // We use a longer timeout because "Delivered" or "Read" might take a moment
+  let lastStatus = "Sent"; 
+  
+  for (let i = 0; i < 30; i++) {
+    const lastMsg = document.querySelector('div.message-out:last-child, [data-testid="msg-container"]:last-child');
+    if (lastMsg) {
+      const statusIcon = lastMsg.querySelector('span[data-icon="msg-check"], span[data-icon="msg-dblcheck"]');
+      if (statusIcon) {
+        const label = statusIcon.getAttribute('aria-label') || "";
+        if (label.includes("Read")) return "Read";
+        if (label.includes("Delivered")) return "Delivered";
+        if (label.includes("Sent")) lastStatus = "Sent";
+      }
+    }
+    await sleep(500);
+    // If we already saw "Sent", we can wait a bit more to see if it turns to "Delivered"
+    // but we don't want to block the whole queue for too long.
+    if (i > 10 && lastStatus === "Sent") break; 
+  }
+  return lastStatus;
 }
 
 async function handleAttachment(attachment, caption = "") {
@@ -276,7 +310,8 @@ async function handleAttachment(attachment, caption = "") {
   if (sendBtn) {
     sendBtn.click();
     await sleep(automationSettings.sendDelay);
-    return true;
+    const status = await verifyMessageSent();
+    return status;
   }
   throw new Error("Send button not found in preview");
 }
@@ -316,9 +351,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const { phone, message, attachment, name } = request.data;
         if (request.settings) automationSettings = { ...automationSettings, ...request.settings };
         await searchAndOpenChat(phone, message, name);
-        if (attachment) await handleAttachment(attachment, message);
-        else await injectMessage(message);
-        sendResponse({ success: true });
+        let status = "sent";
+        if (attachment) {
+          await handleAttachment(attachment, message);
+          status = await verifyMessageSent();
+        } else {
+          await injectMessage(message);
+          status = await verifyMessageSent();
+        }
+        sendResponse({ success: true, status: status.toLowerCase() });
       } catch (e) {
         sendResponse({ success: false, error: e.message });
       }

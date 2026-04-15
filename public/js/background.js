@@ -129,7 +129,7 @@ async function processNext() {
       if (chrome.runtime.lastError || !response || !response.success) {
         broadcastStatus(null, contact.id, 'failed', response?.error || "Unknown error");
       } else {
-        broadcastStatus(null, contact.id, 'sent');
+        broadcastStatus(null, contact.id, response.status || 'sent');
       }
 
       currentIndex++;

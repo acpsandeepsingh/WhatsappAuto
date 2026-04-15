@@ -73,7 +73,7 @@ interface Contact {
     name: string;
     dataUrl: string;
   };
-  status: 'pending' | 'sent' | 'failed' | 'retrying';
+  status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed' | 'retrying';
   error?: string;
 }
 
@@ -892,6 +892,8 @@ export default function App() {
                             <TableCell>
                               <div className="flex flex-col">
                                 <span className={`text-xs font-bold px-2 py-1 rounded-full uppercase tracking-wider w-fit ${
+                                  contact.status === 'read' ? 'bg-blue-100 text-blue-700' :
+                                  contact.status === 'delivered' ? 'bg-indigo-100 text-indigo-700' :
                                   contact.status === 'sent' ? 'bg-green-100 text-green-700' :
                                   contact.status === 'failed' ? 'bg-red-100 text-red-700' :
                                   'bg-slate-100 text-slate-600'
