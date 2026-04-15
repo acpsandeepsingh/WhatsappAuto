@@ -4,12 +4,12 @@ console.log("WhatsApp Automation Loaded");
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const SELECTORS = {
-  searchBox: 'input[data-tab="3"], #_r_b_',
+  searchBox: 'input[data-tab="3"], #_r_b_, div[contenteditable="true"][data-tab="3"]',
   chatList: '#pane-side [role="grid"]',
   chatRow: '[role="row"]',
   messageBox: 'footer div[contenteditable="true"][data-tab="10"], div.lexical-rich-text-input div[contenteditable="true"]',
   captionBox: 'div.x1hx0egp.x6ikm8r.x1odjw0f[role="textbox"], [label="Type a message"], div[contenteditable="true"][data-placeholder="Add a caption"], div[contenteditable="true"].lexical-rich-text-input, div[aria-label="Add a caption"], div[data-tab="10"][contenteditable="true"]',
-  sendBtn: 'span[data-icon="send"], span[data-icon="wds-ic-send-filled"], button[aria-label="Send"], div[role="button"] span[data-icon="send"], button span[data-icon="send"]',
+  sendBtn: 'span[data-icon="send"], span[data-icon="wds-ic-send-filled"], button[aria-label="Send"], div[role="button"] span[data-icon="send"], button span[data-icon="send"], [data-testid="send"], [data-icon="send-light"]',
   attachBtn: 'button[data-tab="10"][aria-label="Attach"]',
   fileInputs: 'input[type="file"]',
   newChatBtn: 'button[aria-label="New chat"], span[data-icon="new-chat-outline"]',
@@ -68,8 +68,8 @@ async function smartWait(selector, fallbackDelay) {
   return null;
 }
 
-async function searchAndOpenChat(phone, message = "") {
-  console.log(`[WhatsApp Automation] Opening chat for: ${phone}`);
+async function searchAndOpenChat(phone, message = "", name = "") {
+  console.log(`[WhatsApp Automation] Opening chat for: ${phone} (${name})`);
   
   if (phone.includes('@g.us')) {
     // It's a group, use the internal API via the injected script
@@ -89,11 +89,9 @@ async function searchAndOpenChat(phone, message = "") {
         document.execCommand('selectAll', false, null);
         document.execCommand('delete', false, null);
         
-        // We need the group name for searching. 
-        // We'll try to get it from the groups state if we can, 
-        // but since content script doesn't have it, we'll try to use the ID as a search term 
-        // (WhatsApp search works with some IDs or we can just try to find the chat if it's already in the list)
-        document.execCommand('insertText', false, phone);
+        // Use group name for searching as requested
+        const searchTerm = name || phone;
+        document.execCommand('insertText', false, searchTerm);
         searchBox.dispatchEvent(new Event('input', { bubbles: true }));
         await sleep(2000);
         
@@ -101,7 +99,7 @@ async function searchAndOpenChat(phone, message = "") {
         if (chatList) {
           const rows = chatList.querySelectorAll(SELECTORS.chatRow);
           for (const row of rows) {
-            if (row.innerText.includes(phone) || row.innerHTML.includes(phone)) {
+            if (row.innerText.toLowerCase().includes(searchTerm.toLowerCase())) {
               row.click();
               break;
             }
@@ -118,13 +116,13 @@ async function searchAndOpenChat(phone, message = "") {
     return true;
   }
 
-  // Use the requested logic to open chat via web.whatsapp.com without full redirect
+  // Use the requested logic to open chat via api.whatsapp.com
   const number = phone.replace(/\D/g, "");
   const text = encodeURIComponent(message);
   
   const a = document.createElement("a");
-  // Use web.whatsapp.com instead of api.whatsapp.com to stay within the app context
-  a.href = `https://web.whatsapp.com/send?phone=${number}&text=${text}`;
+  // Use api.whatsapp.com as requested by user
+  a.href = `https://api.whatsapp.com/send?phone=${number}&text=${text}`;
   a.target = "_self";
   document.body.appendChild(a);
   a.click();
@@ -135,6 +133,9 @@ async function searchAndOpenChat(phone, message = "") {
   if (!messageBox) {
     throw new Error("Message box not found after opening chat. Please ensure you are logged in to WhatsApp Web.");
   }
+  
+  // Extra delay for contact mode to ensure send button logic works same as group
+  await sleep(1000);
   return true;
 }
 
@@ -148,10 +149,8 @@ async function injectMessage(text) {
   
   // Check if text is already there (e.g. from api.whatsapp.com/send?text=...)
   const currentText = messageBox.innerText || messageBox.textContent || "";
-  if (!currentText.includes(text.substring(0, 5))) { 
-    // Only type if it's not already there or looks different
-    document.execCommand('selectAll', false, null);
-    document.execCommand('delete', false, null);
+  if (!currentText.trim()) { 
+    // If empty, type it
     document.execCommand('insertText', false, text);
     messageBox.dispatchEvent(new Event('input', { bubbles: true }));
     await sleep(1000);
@@ -159,7 +158,7 @@ async function injectMessage(text) {
 
   // Try clicking the send button first (more reliable than Enter key)
   let sendBtn = null;
-  for (let i = 0; i < 10; i++) { // Increase attempts
+  for (let i = 0; i < 15; i++) { // Increase attempts for contact mode
     sendBtn = document.querySelector(SELECTORS.sendBtn);
     if (sendBtn) {
       // If we found a span/icon, try to find the clickable parent button
@@ -212,10 +211,22 @@ async function handleAttachment(attachment, caption = "") {
     if (cb) {
       cb.focus();
       document.execCommand('insertText', false, caption);
+      cb.dispatchEvent(new Event('input', { bubbles: true }));
     }
   }
 
-  const sendBtn = await waitForElement(SELECTORS.sendBtn, 5000);
+  // Use more robust send button detection same as injectMessage
+  let sendBtn = null;
+  for (let i = 0; i < 15; i++) {
+    sendBtn = document.querySelector(SELECTORS.sendBtn);
+    if (sendBtn) {
+      const parentButton = sendBtn.closest('button') || sendBtn.closest('[role="button"]');
+      if (parentButton) sendBtn = parentButton;
+      break;
+    }
+    await sleep(500);
+  }
+
   if (sendBtn) {
     sendBtn.click();
     await sleep(automationSettings.sendDelay);
@@ -245,12 +256,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === "fetch_contacts") {
-    // This is often used for fast fetching from IndexedDB or sidebar
-    // We'll try to use the injected API if available, otherwise fallback to a generic message
     callInjected("WA_GET_CONTACTS", { filter: request.filter })
       .then(res => sendResponse(res))
       .catch(err => {
-        // If WA_GET_CONTACTS is not implemented in inject.js, we can try a basic scrape or just return error
         sendResponse({ success: false, error: "Fast fetch not available. Try UI scrape." });
       });
     return true;
@@ -259,9 +267,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "process_row") {
     (async () => {
       try {
-        const { phone, message, attachment } = request.data;
+        const { phone, message, attachment, name } = request.data;
         if (request.settings) automationSettings = { ...automationSettings, ...request.settings };
-        await searchAndOpenChat(phone, message);
+        await searchAndOpenChat(phone, message, name);
         if (attachment) await handleAttachment(attachment, message);
         else await injectMessage(message);
         sendResponse({ success: true });

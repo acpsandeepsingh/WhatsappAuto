@@ -11,16 +11,16 @@
     async function getFromIndexedDB(dbName, storeName, filterFn = () => true) {
         return new Promise((resolve, reject) => {
             const request = indexedDB.open(dbName);
-            request.onerror = () => reject(new Error("Failed to open IndexedDB"));
+            request.onerror = () => reject(new Error(`Failed to open IndexedDB: ${dbName}`));
             request.onsuccess = (event) => {
                 const db = event.target.result;
                 // Try to find the store even if the name is slightly different (common in WA updates)
                 const actualStoreName = db.objectStoreNames.contains(storeName) 
                     ? storeName 
-                    : Array.from(db.objectStoreNames).find(name => name.includes(storeName));
+                    : Array.from(db.objectStoreNames).find(name => name.toLowerCase().includes(storeName.toLowerCase()));
                 
                 if (!actualStoreName) {
-                    console.warn(`Store ${storeName} not found in ${dbName}`);
+                    console.warn(`Store ${storeName} not found in ${dbName}. Available:`, Array.from(db.objectStoreNames));
                     return resolve([]);
                 }
                 const transaction = db.transaction(actualStoreName, "readonly");
@@ -29,9 +29,22 @@
                 getAllRequest.onsuccess = () => {
                     resolve(getAllRequest.result.filter(filterFn));
                 };
-                getAllRequest.onerror = () => reject(new Error("Failed to get data from store"));
+                getAllRequest.onerror = () => reject(new Error(`Failed to get data from store: ${actualStoreName}`));
             };
         });
+    }
+
+    async function tryMultipleDBs(storeName, filterFn) {
+        const dbs = ["model-storage", "wawc-db", "lru-storage", "storage"];
+        for (const db of dbs) {
+            try {
+                const results = await getFromIndexedDB(db, storeName, filterFn);
+                if (results && results.length > 0) return results;
+            } catch (e) {
+                console.warn(`DB ${db} check failed:`, e.message);
+            }
+        }
+        return [];
     }
 
     window.addEventListener("message", async (event) => {
@@ -71,10 +84,10 @@
                 } else {
                     // Fallback to IndexedDB with multiple possible store names
                     console.log("WhatsApp Automation: Falling back to IndexedDB for groups");
-                    const chats = await getFromIndexedDB("model-storage", "chat", (c) => c.id && c.id.includes("@g.us"));
+                    const chats = await tryMultipleDBs("chat", (c) => c.id && c.id.includes("@g.us"));
                     groups = chats.map(c => ({
                         id: c.id,
-                        subject: c.name || c.formattedTitle || c.subject || "Unknown Group",
+                        subject: c.name || c.formattedTitle || c.subject || c.title || "Unknown Group",
                         isGroup: true
                     }));
                 }
@@ -96,14 +109,14 @@
                 } else {
                     // Fallback to IndexedDB
                     console.log("WhatsApp Automation: Falling back to IndexedDB for group members");
-                    const groupMetadata = await getFromIndexedDB("model-storage", "group-metadata", (g) => g.id === chatId);
+                    const groupMetadata = await tryMultipleDBs("group-metadata", (g) => g.id === chatId);
                     if (groupMetadata && groupMetadata.length > 0) {
                         members = groupMetadata[0].participants || [];
                     } else {
                         // Try fetching from chat store as fallback
-                        const chats = await getFromIndexedDB("model-storage", "chat", (c) => c.id === chatId);
-                        if (chats && chats.length > 0 && chats[0].groupMetadata) {
-                            members = chats[0].groupMetadata.participants || [];
+                        const chats = await tryMultipleDBs("chat", (c) => c.id === chatId);
+                        if (chats && chats.length > 0 && (chats[0].groupMetadata || chats[0].participants)) {
+                            members = (chats[0].groupMetadata ? chats[0].groupMetadata.participants : chats[0].participants) || [];
                         } else {
                             throw new Error("Group metadata not found in IndexedDB. Please open the group manually once.");
                         }
@@ -125,10 +138,10 @@
                 } else {
                     // Fallback to IndexedDB
                     console.log("WhatsApp Automation: Falling back to IndexedDB for contacts");
-                    const allContacts = await getFromIndexedDB("model-storage", "contact", (c) => c.id && c.id.includes("@c.us"));
+                    const allContacts = await tryMultipleDBs("contact", (c) => c.id && c.id.includes("@c.us"));
                     contacts = allContacts.map(c => ({
                         id: c.id,
-                        name: c.name || c.pushname || c.formattedName || c.shortName || "Unknown",
+                        name: c.name || c.pushname || c.formattedName || c.shortName || c.verifiedName || "Unknown",
                         phone: c.id.split('@')[0]
                     }));
                 }
