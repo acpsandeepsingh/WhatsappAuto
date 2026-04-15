@@ -104,9 +104,17 @@ async function searchAndOpenChat(phone, message = "", name = "") {
             const rowText = row.innerText.toLowerCase();
             if (rowText.includes(searchTerm.toLowerCase())) {
               console.log("[WhatsApp Automation] Found matching row, clicking...");
-              // Target the specific gridcell mentioned by user or the row itself
+              // Target the specific gridcell mentioned by user
               const target = row.querySelector('div[role="gridcell"]._ak8o') || row.querySelector('div[role="button"]') || row;
+              
+              // Use a more forceful click mechanism
+              const clickEvent = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window });
+              target.dispatchEvent(clickEvent);
+              await sleep(100);
               target.click();
+              const upEvent = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window });
+              target.dispatchEvent(upEvent);
+              
               clicked = true;
               break;
             }

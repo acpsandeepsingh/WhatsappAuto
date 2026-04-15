@@ -56,7 +56,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === "start_queue") {
-    queue = request.contacts || [];
+    queue = (request.contacts || []).map(c => {
+      // Ensure message is populated from template if missing
+      if (!c.message && c.message_template) {
+        let msg = c.message_template;
+        msg = msg.replace(/{{name}}/g, c.name || "");
+        msg = msg.replace(/{{phone}}/g, c.phone || "");
+        msg = msg.replace(/{{sr_no}}/g, c.sr_no || "");
+        return { ...c, message: msg };
+      }
+      return c;
+    });
     settings = request.settings || {};
     status = 'running';
     currentIndex = 0;

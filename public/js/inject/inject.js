@@ -163,7 +163,12 @@
         if (type === "WA_GET_CONTACTS") {
             try {
                 let contacts = [];
-                if (window.WPP && window.WPP.contact && window.WPP.contact.list) {
+                const filter = event.data.filter || {};
+                
+                if (filter.primary === 'group' && filter.secondary) {
+                    console.log("WhatsApp Automation: Fetching members for group", filter.secondary);
+                    contacts = await scrapeGroupMembersFromDB(filter.secondary);
+                } else if (window.WPP && window.WPP.contact && window.WPP.contact.list) {
                     contacts = await window.WPP.contact.list();
                 } else if (window.BULK_WPP && window.BULK_WPP.contact && window.BULK_WPP.contact.list) {
                     contacts = await window.BULK_WPP.contact.list();

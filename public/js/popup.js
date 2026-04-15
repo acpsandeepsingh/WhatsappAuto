@@ -107,6 +107,7 @@ document.getElementById('startGroupCampaign').addEventListener('click', () => {
         name: group?.subject || "Unknown Group",
         phone: group?.id || group?.subject || "",
         message: data.settings?.defaultTemplate || "Hello!",
+        attachment: data.settings?.attachment || null, // Include attachment if present
         status: 'pending'
       };
     });
