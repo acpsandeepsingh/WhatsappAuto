@@ -295,6 +295,27 @@ async function handleAttachment(attachment, caption = "") {
     }
   }
 
+  // Wait for attachment to be fully loaded (indicated by the presence of ic-close title in SVG)
+  console.log("[WhatsApp Automation] Waiting for attachment to load...");
+  let loaded = false;
+  for (let i = 0; i < 60; i++) { // Wait up to 30 seconds for large files
+    const titles = document.querySelectorAll('title');
+    for (const t of titles) {
+      if (t.textContent === 'ic-close') {
+        loaded = true;
+        break;
+      }
+    }
+    if (loaded) break;
+    await sleep(500);
+  }
+  
+  if (!loaded) {
+    console.warn("[WhatsApp Automation] Attachment load indicator (ic-close) not found, but trying to send anyway.");
+  } else {
+    console.log("[WhatsApp Automation] Attachment loaded successfully.");
+  }
+
   // Use more robust send button detection same as injectMessage
   let sendBtn = null;
   for (let i = 0; i < 15; i++) {
