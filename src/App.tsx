@@ -1210,6 +1210,9 @@ export default function App() {
                   <Button variant="outline" onClick={() => fetchContactsFromSidebar('group')} disabled={isScraping}>
                     All Groups
                   </Button>
+                  <Button variant="outline" onClick={() => fetchContactsFromSidebar('saved_contacts')} disabled={isScraping}>
+                    Saved Contacts Only
+                  </Button>
                   <Button variant="outline" onClick={() => {
                     if (typeof chrome !== 'undefined' && chrome.runtime) {
                       setIsScraping(true);
@@ -1217,8 +1220,16 @@ export default function App() {
                         chrome.runtime.sendMessage({ action: "GET_CHAT_SNAPSHOT" }, (response) => {
                           setIsScraping(false);
                           if (response && response.success) {
-                            toast.success("Chat snapshot captured");
-                            // You might want to do something with the snapshot data here
+                            const newContacts: Contact[] = response.data.map((c: any, idx: number) => ({
+                              id: crypto.randomUUID(),
+                              sr_no: (contacts.length + idx + 1).toString(),
+                              name: c.name || "Unknown",
+                              phone: c.phone || "",
+                              message_template: settings.defaultTemplate,
+                              status: 'pending'
+                            }));
+                            setContacts(prev => [...prev, ...newContacts]);
+                            toast.success(`Captured snapshot of ${newContacts.length} chats`);
                           } else {
                             toast.error(response?.error || "Failed to get chat snapshot");
                           }

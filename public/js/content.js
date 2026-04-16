@@ -377,6 +377,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "get_chat_snapshot") {
+    callInjected("WA_GET_CHAT_SNAPSHOT")
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   if (request.action === "process_row") {
     (async () => {
       try {

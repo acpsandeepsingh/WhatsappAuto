@@ -168,22 +168,72 @@
                 if (filter.primary === 'group' && filter.secondary) {
                     console.log("WhatsApp Automation: Fetching members for group", filter.secondary);
                     contacts = await scrapeGroupMembersFromDB(filter.secondary);
-                } else if (window.WPP && window.WPP.contact && window.WPP.contact.list) {
-                    contacts = await window.WPP.contact.list();
-                } else if (window.BULK_WPP && window.BULK_WPP.contact && window.BULK_WPP.contact.list) {
-                    contacts = await window.BULK_WPP.contact.list();
                 } else {
-                    console.log("WhatsApp Automation: Falling back to contact store");
-                    const rows = await getFromIndexedDB("model-storage", "contact");
-                    contacts = rows.map(c => ({
-                        id: c.id,
-                        name: c.name || c.pushname || "Unknown",
-                        phone: c.phoneNumber ? String(c.phoneNumber).replace(/@c\.us$/, "") : c.id.split('@')[0]
+                    let rawList = [];
+                    const wpp = window.WPP || window.BULK_WPP;
+                    
+                    if (wpp && wpp.chat && wpp.chat.list) {
+                        const allChats = await wpp.chat.list();
+                        if (filter.primary === 'unread_chats') {
+                            rawList = allChats.filter(c => c.unreadCount > 0 || c.hasUnread);
+                        } else if (filter.primary === 'group') {
+                            rawList = allChats.filter(c => c.isGroup || (c.id && c.id._serialized && c.id._serialized.includes('@g.us')));
+                        } else if (filter.primary === 'saved_contacts') {
+                            const allContacts = (wpp.contact && wpp.contact.list) ? await wpp.contact.list() : [];
+                            rawList = allContacts.filter(c => c.isMyContact || c.isAddressBookContact);
+                        } else {
+                            rawList = allChats;
+                        }
+                    } else {
+                        // Fallback to IndexedDB
+                        console.log("WhatsApp Automation: Falling back to contact store for filter:", filter.primary);
+                        const rows = await getFromIndexedDB("model-storage", "contact");
+                        if (filter.primary === 'unread_chats') {
+                            // IndexedDB might not have unread status easily, so we just return all for now or empty
+                            rawList = []; 
+                        } else if (filter.primary === 'group') {
+                            rawList = rows.filter(c => c.id && c.id.includes('@g.us'));
+                        } else if (filter.primary === 'saved_contacts') {
+                            rawList = rows.filter(c => c.isMyContact || c.name);
+                        } else {
+                            rawList = rows;
+                        }
+                    }
+
+                    contacts = rawList.map(c => ({
+                        id: typeof c.id === 'object' ? c.id._serialized : c.id,
+                        name: c.name || c.pushname || c.formattedName || "Unknown",
+                        phone: (c.id && typeof c.id === 'object') ? c.id.user : (c.id ? c.id.split('@')[0] : "")
                     }));
                 }
                 window.postMessage({ type: "WA_GET_CONTACTS_RESULT", requestId, success: true, data: contacts }, "*");
             } catch (err) {
                 window.postMessage({ type: "WA_GET_CONTACTS_RESULT", requestId, success: false, error: err.message }, "*");
+            }
+        }
+
+        if (type === "WA_GET_CHAT_SNAPSHOT") {
+            try {
+                let chats = [];
+                const wpp = window.WPP || window.BULK_WPP;
+                if (wpp && wpp.chat && wpp.chat.list) {
+                    chats = await wpp.chat.list();
+                } else {
+                    chats = await getFromIndexedDB("model-storage", "chat");
+                }
+                
+                const data = chats.map(c => ({
+                    id: typeof c.id === 'object' ? c.id._serialized : c.id,
+                    name: c.name || c.pushname || c.formattedName || "Unknown",
+                    phone: (c.id && typeof c.id === 'object') ? c.id.user : (c.id ? c.id.split('@')[0] : ""),
+                    unreadCount: c.unreadCount || 0,
+                    isGroup: c.isGroup || (c.id && c.id._serialized && c.id._serialized.includes('@g.us')),
+                    lastMessage: c.lastMessage ? (c.lastMessage.body || c.lastMessage.text || "") : ""
+                }));
+                
+                window.postMessage({ type: "WA_GET_CHAT_SNAPSHOT_RESULT", requestId, success: true, data }, "*");
+            } catch (err) {
+                window.postMessage({ type: "WA_GET_CHAT_SNAPSHOT_RESULT", requestId, success: false, error: err.message }, "*");
             }
         }
     });

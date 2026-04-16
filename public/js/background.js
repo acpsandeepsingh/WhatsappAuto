@@ -9,7 +9,7 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === "CHECK_CONNECTION" || request.action === "GET_GROUPS" || request.action === "FETCH_CONTACTS" || request.action === "SCRAPE_GROUP") {
+  if (request.action === "CHECK_CONNECTION" || request.action === "GET_GROUPS" || request.action === "FETCH_CONTACTS" || request.action === "SCRAPE_GROUP" || request.action === "GET_CHAT_SNAPSHOT") {
     chrome.tabs.query({ url: "*://*.whatsapp.com/*" }, (tabs) => {
       if (tabs.length > 0) {
         const targetTab = tabs[0];
@@ -31,6 +31,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (request.action === "GET_GROUPS") contentAction = "get_groups";
             if (request.action === "SCRAPE_GROUP") contentAction = "scrape_group";
             if (request.action === "FETCH_CONTACTS") contentAction = "fetch_contacts";
+            if (request.action === "GET_CHAT_SNAPSHOT") contentAction = "get_chat_snapshot";
 
             chrome.tabs.sendMessage(targetTab.id, { ...request, action: contentAction }, (res) => {
               if (chrome.runtime.lastError) {
