@@ -133,10 +133,13 @@ async function processNext() {
 
   const contact = queue[currentIndex];
   
-  // Apply global attachment if contact doesn't have one
+  // Apply appropriate global fallback attachment
+  const isGroup = contact.phone && contact.phone.includes('@g.us');
+  const fallbackAttachment = isGroup ? settings.groupAttachment : settings.attachment;
+  
   const dataToSend = {
     ...contact,
-    attachment: contact.attachment || settings.attachment
+    attachment: contact.attachment || fallbackAttachment
   };
 
   chrome.tabs.query({ url: "*://*.whatsapp.com/*" }, async (tabs) => {

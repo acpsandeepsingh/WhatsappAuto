@@ -91,66 +91,36 @@ async function searchAndOpenChat(phone, message = "", name = "") {
   
   const isGroup = phone.includes('@g.us');
   
-  if (automationSettings.useDirectOpen || isGroup) {
-    // Try direct open first
-    try {
-      console.log("[WhatsApp Automation] Attempting direct chat open...");
-      const res = await callInjected("WA_OPEN_CHAT", { phone });
-      if (res.useFallback) {
-        throw new Error("API fallback requested");
+  if (isGroup) {
+    // Group logic: Try direct open, then search
+    if (automationSettings.useDirectOpen) {
+      try {
+        console.log("[WhatsApp Automation] Attempting direct group open...");
+        const res = await callInjected("WA_OPEN_CHAT", { phone });
+        if (res.useFallback) throw new Error("API fallback requested");
+        await smartWait(SELECTORS.messageBox, automationSettings.openChatDelay);
+      } catch (err) {
+        console.warn("[WhatsApp Automation] Direct group open failed, falling back to search:", err.message);
+        await manualSearch(phone, name, true);
       }
-      // Wait for chat to load using setting
-      await smartWait(SELECTORS.messageBox, automationSettings.openChatDelay);
-    } catch (err) {
-      console.warn("[WhatsApp Automation] Direct open failed, falling back to search:", err.message);
-      
-      const searchBox = await waitForElement(SELECTORS.searchBox);
-      if (searchBox) {
-        searchBox.click();
-        searchBox.focus();
-        document.execCommand('selectAll', false, null);
-        document.execCommand('delete', false, null);
-        
-        const searchTerm = isGroup ? (name || phone) : phone;
-        document.execCommand('insertText', false, searchTerm);
-        searchBox.dispatchEvent(new Event('input', { bubbles: true }));
-        
-        // Wait for results using setting
-        await sleep(automationSettings.searchDelay);
-        
-        const chatList = document.querySelector(SELECTORS.chatList);
-        if (chatList) {
-          const rows = chatList.querySelectorAll(SELECTORS.chatRow);
-          let targetRow = null;
-          
-          if (isGroup) {
-            // Prioritize exact name match for groups
-            for (const row of rows) {
-              const titleEl = row.querySelector('span[title]');
-              const title = titleEl ? titleEl.getAttribute('title') : "";
-              if (title.toLowerCase() === searchTerm.toLowerCase()) {
-                targetRow = row;
-                break;
-              }
-            }
-          }
-          
-          if (!targetRow && rows.length > 0) targetRow = rows[0];
+    } else {
+      await manualSearch(phone, name, true);
+    }
 
-          if (targetRow) {
-            const target = targetRow.querySelector('div[role="gridcell"]._ak8o') || targetRow.querySelector('div[role="button"]') || targetRow;
-            const clickEvent = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window });
-            target.dispatchEvent(clickEvent);
-            await sleep(100);
-            target.click();
-            const upEvent = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window });
-            target.dispatchEvent(upEvent);
-          }
+    // Verify name for groups
+    if (name) {
+      await sleep(1000);
+      const headerTitle = document.querySelector(SELECTORS.chatHeaderTitle);
+      if (headerTitle) {
+        const openedName = headerTitle.innerText.trim();
+        console.log(`[WhatsApp Automation] Verifying opened group: "${openedName}" vs expected: "${name}"`);
+        if (openedName.toLowerCase() !== name.toLowerCase()) {
+          console.warn(`[WhatsApp Automation] Group name mismatch! Opened: "${openedName}", Expected: "${name}"`);
         }
       }
     }
   } else {
-    // Legacy mode: Use api.whatsapp.com/send
+    // Contact logic: Use api.whatsapp.com/send (the link method) as requested
     const number = phone.replace(/\D/g, "");
     const text = encodeURIComponent(message);
     
@@ -162,31 +132,61 @@ async function searchAndOpenChat(phone, message = "", name = "") {
     a.click();
     await sleep(1000);
     if (a.parentNode) a.parentNode.removeChild(a);
+    
+    // No name verification for contacts as requested
   }
   
-    // Wait for the chat to actually load
-    const messageBox = await waitForElement(SELECTORS.messageBox, 20000);
-    if (!messageBox) {
-      throw new Error("Message box not found. Make sure the chat is open and loaded.");
-    }
+  const messageBox = await waitForElement(SELECTORS.messageBox, 35000);
+  if (!messageBox) {
+    throw new Error("Message box not found. Make sure the chat is open and loaded.");
+  }
 
-    // Verify the chat name if provided
-    if (name) {
-      await sleep(500); // Small wait for header to update
-      const headerTitle = document.querySelector(SELECTORS.chatHeaderTitle);
-      if (headerTitle) {
-        const openedName = headerTitle.innerText.trim();
-        console.log(`[WhatsApp Automation] Verifying opened chat: "${openedName}" vs expected: "${name}"`);
-        if (openedName.toLowerCase() !== name.toLowerCase()) {
-          console.warn(`[WhatsApp Automation] Name mismatch! Opened: "${openedName}", Expected: "${name}"`);
-          // If it's a critical mismatch, we might want to stop, but for now let's just log
-        } else {
-          console.log("[WhatsApp Automation] Chat name verified successfully.");
+  return true;
+}
+
+async function manualSearch(phone, name, isGroup) {
+  const searchBox = await waitForElement(SELECTORS.searchBox);
+  if (!searchBox) return;
+
+  searchBox.click();
+  searchBox.focus();
+  document.execCommand('selectAll', false, null);
+  document.execCommand('delete', false, null);
+  
+  const searchTerm = isGroup ? (name || phone) : phone;
+  document.execCommand('insertText', false, searchTerm);
+  searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+  
+  await sleep(automationSettings.searchDelay);
+  
+  const chatList = document.querySelector(SELECTORS.chatList);
+  if (chatList) {
+    const rows = chatList.querySelectorAll(SELECTORS.chatRow);
+    let targetRow = null;
+    
+    if (isGroup) {
+      for (const row of rows) {
+        const titleEl = row.querySelector('span[title]');
+        const title = titleEl ? titleEl.getAttribute('title') : "";
+        if (title.toLowerCase() === searchTerm.toLowerCase()) {
+          targetRow = row;
+          break;
         }
       }
     }
+    
+    if (!targetRow && rows.length > 0) targetRow = rows[0];
 
-    return true;
+    if (targetRow) {
+      const target = targetRow.querySelector('div[role="gridcell"]._ak8o') || targetRow.querySelector('div[role="button"]') || targetRow;
+      const clickEvent = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window });
+      target.dispatchEvent(clickEvent);
+      await sleep(100);
+      target.click();
+      const upEvent = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window });
+      target.dispatchEvent(upEvent);
+    }
+  }
 }
 
 async function injectMessage(text) {

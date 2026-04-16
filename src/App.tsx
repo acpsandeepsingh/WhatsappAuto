@@ -100,6 +100,10 @@ interface AppSettings {
     name: string;
     dataUrl: string;
   };
+  groupAttachment?: {
+    name: string;
+    dataUrl: string;
+  };
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -256,13 +260,16 @@ export default function App() {
       
       const targetName = name || contact?.name || group?.subject || "";
       const message = sendDraft ? (contact ? parseTemplate(contact.message_template, contact) : settings.defaultTemplate) : "";
+      
+      const isGroup = target.includes('@g.us');
+      const fallbackAttachment = isGroup ? settings.groupAttachment : settings.attachment;
 
       chrome.runtime.sendMessage({ 
         action: "OPEN_CHAT", 
         phone: target,
         name: targetName,
         message: message,
-        attachment: sendDraft ? settings.attachment : null,
+        attachment: sendDraft ? (contact?.attachment || fallbackAttachment) : null,
         sendImmediately: sendDraft,
         useDirectMethod: true // Signal to use WPP.chat.open or similar
       }, (response) => {
@@ -499,7 +506,7 @@ export default function App() {
         name: group?.subject || "Unknown Group",
         phone: group?.id || group?.subject || "", // Prefer ID for direct open
         message_template: settings.defaultTemplate,
-        attachment: settings.attachment, // Include campaign attachment
+        attachment: settings.groupAttachment, // Use group-specific global attachment
         status: 'pending'
       };
     });
@@ -992,16 +999,16 @@ export default function App() {
                   <div className="w-full md:w-80 space-y-4 flex flex-col justify-between">
                     <div className="space-y-2">
                       <Label className="block">Campaign Attachment</Label>
-                      {settings.attachment ? (
+                      {settings.groupAttachment ? (
                         <div className="flex items-center justify-between p-2 bg-slate-50 border rounded-md">
                           <div className="flex items-center gap-2">
                             <FileText className="w-4 h-4 text-blue-500" />
-                            <span className="text-sm font-medium truncate max-w-[150px]">{settings.attachment.name}</span>
+                            <span className="text-sm font-medium truncate max-w-[150px]">{settings.groupAttachment.name}</span>
                           </div>
                           <Button 
                             variant="ghost" 
                             size="sm" 
-                            onClick={() => setSettings(prev => ({ ...prev, attachment: undefined }))}
+                            onClick={() => setSettings(prev => ({ ...prev, groupAttachment: undefined }))}
                             className="h-8 w-8 p-0 text-slate-400 hover:text-red-500"
                           >
                             <X className="w-4 h-4" />
@@ -1020,12 +1027,12 @@ export default function App() {
                               reader.onload = (evt) => {
                                 setSettings(prev => ({
                                   ...prev,
-                                  attachment: {
+                                  groupAttachment: {
                                     name: file.name,
                                     dataUrl: evt.target?.result as string
                                   }
                                 }));
-                                toast.success("Attachment added to campaign");
+                                toast.success("Attachment added to group campaign");
                               };
                               reader.readAsDataURL(file);
                             };
