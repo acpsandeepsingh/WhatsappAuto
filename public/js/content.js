@@ -215,6 +215,17 @@ async function injectMessage(text) {
     document.execCommand('insertText', false, text);
     messageBox.dispatchEvent(new Event('input', { bubbles: true }));
     await sleep(automationSettings.pasteDelay);
+
+    // Verify text injection
+    const verifiedText = (messageBox.innerText || messageBox.textContent || "").trim();
+    if (!verifiedText.includes(text.substring(0, 10)) && verifiedText !== text) {
+      console.log("[WhatsApp Automation] Text injection verification failed in message box, retrying...");
+      messageBox.focus();
+      document.execCommand('selectAll', false, null);
+      document.execCommand('insertText', false, text);
+      messageBox.dispatchEvent(new Event('input', { bubbles: true }));
+      await sleep(1000);
+    }
   } else {
     console.log("[WhatsApp Automation] Message box already has text, skipping typing");
   }
@@ -303,6 +314,17 @@ async function handleAttachment(attachment, caption = "") {
       cb.focus();
       document.execCommand('insertText', false, caption);
       cb.dispatchEvent(new Event('input', { bubbles: true }));
+      
+      // Verify text injection
+      await sleep(500);
+      const currentText = cb.textContent || "";
+      if (!currentText.includes(caption.substring(0, 10))) {
+        console.log("[WhatsApp Automation] Text injection verification failed, retrying...");
+        cb.focus();
+        document.execCommand('selectAll', false, null);
+        document.execCommand('insertText', false, caption);
+        cb.dispatchEvent(new Event('input', { bubbles: true }));
+      }
     }
   }
 
@@ -325,12 +347,13 @@ async function handleAttachment(attachment, caption = "") {
     console.warn("[WhatsApp Automation] Attachment load indicator (ic-close) not found, but trying to send anyway.");
   } else {
     console.log("[WhatsApp Automation] Attachment loaded successfully.");
+    await sleep(1000); // Wait for animations
   }
 
   // Use more robust send button detection same as injectMessage
   let sendBtn = null;
-  for (let i = 0; i < 15; i++) {
-    sendBtn = document.querySelector(SELECTORS.sendBtn);
+  for (let i = 0; i < 20; i++) {
+    sendBtn = document.querySelector(SELECTORS.sendBtn) || document.querySelector('[data-testid="send"]') || document.querySelector('[data-icon="send"]');
     if (sendBtn) {
       const parentButton = sendBtn.closest('button') || sendBtn.closest('[role="button"]');
       if (parentButton) sendBtn = parentButton;
@@ -340,11 +363,27 @@ async function handleAttachment(attachment, caption = "") {
   }
 
   if (sendBtn) {
+    console.log("[WhatsApp Automation] Clicking attachment send button");
     sendBtn.click();
+    await sleep(500);
+    // fallback if still there
+    if (document.querySelector(SELECTORS.sendBtn)) {
+       sendBtn.click();
+    }
     await sleep(automationSettings.sendDelay);
     const status = await verifyMessageSent();
     return status;
   }
+  
+  console.log("[WhatsApp Automation] Send button not found in preview, trying Enter key");
+  const eventOptions = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+  const capBox = document.querySelector(SELECTORS.captionBox);
+  if (capBox) {
+    capBox.dispatchEvent(new KeyboardEvent('keydown', eventOptions));
+    await sleep(1000);
+    return await verifyMessageSent();
+  }
+  
   throw new Error("Send button not found in preview");
 }
 

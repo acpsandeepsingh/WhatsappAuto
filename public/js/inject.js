@@ -175,12 +175,23 @@
                     if (wpp && wpp.chat && wpp.chat.list) {
                         const allChats = await wpp.chat.list();
                         if (filter.primary === 'unread_chats') {
-                            rawList = allChats.filter(c => c.unreadCount > 0 || c.hasUnread);
+                            // Better unread check: include those with unread messages or mentions
+                            rawList = allChats.filter(c => 
+                                c.unreadCount > 0 || 
+                                c.hasUnread || 
+                                c.isUnreadType || 
+                                (c.id && c.id._serialized && c.unreadCount > 0)
+                            );
                         } else if (filter.primary === 'group') {
                             rawList = allChats.filter(c => c.isGroup || (c.id && c.id._serialized && c.id._serialized.includes('@g.us')));
                         } else if (filter.primary === 'saved_contacts') {
+                            // Fetch all contacts and filter by those in address book
                             const allContacts = (wpp.contact && wpp.contact.list) ? await wpp.contact.list() : [];
-                            rawList = allContacts.filter(c => c.isMyContact || c.isAddressBookContact);
+                            rawList = allContacts.filter(c => 
+                                c.isMyContact || 
+                                c.isAddressBookContact || 
+                                (c.name && !c.isGroup && !c.id.includes('@g.us'))
+                            );
                         } else {
                             rawList = allChats;
                         }
@@ -200,11 +211,36 @@
                         }
                     }
 
-                    contacts = rawList.map(c => ({
-                        id: typeof c.id === 'object' ? c.id._serialized : c.id,
-                        name: c.name || c.pushname || c.formattedName || "Unknown",
-                        phone: (c.id && typeof c.id === 'object') ? c.id.user : (c.id ? c.id.split('@')[0] : "")
-                    }));
+                    contacts = rawList.map(c => {
+                        const id = typeof c.id === 'object' ? c.id._serialized : c.id;
+                        let phone = (c.id && typeof c.id === 'object') ? c.id.user : (c.id ? c.id.split('@')[0] : "");
+                        
+                        // Clean phone number: remove non-digits
+                        const cleanPhone = phone.replace(/\D/g, "");
+                        
+                        return {
+                            id: id,
+                            name: c.name || c.pushname || c.formattedName || "Unknown",
+                            phone: cleanPhone || phone
+                        };
+                    }).filter(c => {
+                        // Filter out non-numeric phone numbers unless it's a group
+                        const isGroup = c.id.includes('@g.us');
+                        if (isGroup) return true;
+                        
+                        // Valid mobile numbers are usually 8-15 digits
+                        // If it's too long (like an internal ID), we skip it
+                        return /^\d{8,15}$/.test(c.phone);
+                    });
+
+                    // Deduplicate by phone number mainly, but keep groups separate
+                    const seen = new Set();
+                    contacts = contacts.filter(c => {
+                        const key = c.id.includes('@g.us') ? c.id : c.phone;
+                        if (seen.has(key)) return false;
+                        seen.add(key);
+                        return true;
+                    });
                 }
                 window.postMessage({ type: "WA_GET_CONTACTS_RESULT", requestId, success: true, data: contacts }, "*");
             } catch (err) {

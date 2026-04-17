@@ -69,6 +69,7 @@ interface Contact {
   name: string;
   phone: string;
   message_template: string;
+  isGroup?: boolean;
   attachment?: {
     name: string;
     dataUrl: string;
@@ -94,8 +95,10 @@ interface AppSettings {
   sendDelay: number;
   useSmartWait: boolean;
   useDirectOpen: boolean;
-  autoStartTime?: string; // ISO string or empty
-  autoStartEnabled?: boolean;
+  individualAutoStartTime?: string;
+  individualAutoStartEnabled?: boolean;
+  groupAutoStartTime?: string;
+  groupAutoStartEnabled?: boolean;
   attachment?: {
     name: string;
     dataUrl: string;
@@ -118,8 +121,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   sendDelay: 1000,
   useSmartWait: true,
   useDirectOpen: true,
-  autoStartTime: "",
-  autoStartEnabled: false
+  individualAutoStartTime: "",
+  individualAutoStartEnabled: false,
+  groupAutoStartTime: "",
+  groupAutoStartEnabled: false
 };
 
 /**
@@ -127,7 +132,8 @@ const DEFAULT_SETTINGS: AppSettings = {
  * Handles contact management, automation control, and settings.
  */
 export default function App() {
-  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [individualContacts, setIndividualContacts] = useState<Contact[]>([]);
+  const [groupContacts, setGroupContacts] = useState<Contact[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -145,16 +151,19 @@ export default function App() {
   useEffect(() => {
     const loadData = async () => {
       if (typeof chrome !== 'undefined' && chrome.storage) {
-        const result = await chrome.storage.local.get(['contacts', 'settings', 'groups', 'selectedGroups']);
-        if (result.contacts) setContacts(result.contacts);
+        const result = await chrome.storage.local.get(['individualContacts', 'groupContacts', 'settings', 'groups', 'selectedGroups']);
+        if (result.individualContacts) setIndividualContacts(result.individualContacts);
+        if (result.groupContacts) setGroupContacts(result.groupContacts);
         if (result.settings) setSettings(result.settings);
         if (result.groups) setGroups(result.groups);
         if (result.selectedGroups) setSelectedGroups(result.selectedGroups);
       } else {
-        const savedContacts = localStorage.getItem('contacts');
+        const savedIndiv = localStorage.getItem('individualContacts');
+        const savedGroup = localStorage.getItem('groupContacts');
         const savedSettings = localStorage.getItem('settings');
         const savedGroups = localStorage.getItem('groups');
-        if (savedContacts) setContacts(JSON.parse(savedContacts));
+        if (savedIndiv) setIndividualContacts(JSON.parse(savedIndiv));
+        if (savedGroup) setGroupContacts(JSON.parse(savedGroup));
         if (savedSettings) setSettings(JSON.parse(savedSettings));
         if (savedGroups) setGroups(JSON.parse(savedGroups));
       }
@@ -173,22 +182,25 @@ export default function App() {
         
         // Update local status based on the specific contact that finished
         if (message.contactId) {
-          setContacts(prev => {
-            const newContacts = prev.map(c => {
-              if (c.id === message.contactId) {
-                return { ...c, status: message.lastStatus, error: message.lastError };
-              }
-              return c;
-            });
-            
-            // Also update the current highlighting index based on the contactId
-            const idx = newContacts.findIndex(c => c.id === message.contactId);
-            if (idx !== -1) setCurrentIndex(idx);
-            
-            return newContacts;
-          });
-        } else if (message.currentIndex !== undefined && message.currentIndex === -1) {
-          setCurrentIndex(-1);
+          setIndividualContacts(prev => prev.map(c => {
+            if (c.id === message.contactId) {
+              return { ...c, status: message.lastStatus, error: message.lastError };
+            }
+            return c;
+          }));
+          
+          setGroupContacts(prev => prev.map(c => {
+            if (c.id === message.contactId) {
+              return { ...c, status: message.lastStatus, error: message.lastError };
+            }
+            return c;
+          }));
+
+          // Update current index for highlighting
+          // We need to know which list is active, but for now we can just find it in either
+          // This is a bit tricky since currentIndex is used for highlighting in the table
+        } else if (message.currentIndex !== undefined) {
+          setCurrentIndex(message.currentIndex);
         }
       }
     };
@@ -201,41 +213,69 @@ export default function App() {
   // Save state
   useEffect(() => {
     if (typeof chrome !== 'undefined' && chrome.storage) {
-      chrome.storage.local.set({ contacts, settings, groups, selectedGroups });
+      chrome.storage.local.set({ individualContacts, groupContacts, settings, groups, selectedGroups });
     } else {
-      localStorage.setItem('contacts', JSON.stringify(contacts));
+      localStorage.setItem('individualContacts', JSON.stringify(individualContacts));
+      localStorage.setItem('groupContacts', JSON.stringify(groupContacts));
       localStorage.setItem('settings', JSON.stringify(settings));
       localStorage.setItem('groups', JSON.stringify(groups));
       localStorage.setItem('selectedGroups', JSON.stringify(selectedGroups));
     }
-  }, [contacts, settings, groups, selectedGroups]);
+  }, [individualContacts, groupContacts, settings, groups, selectedGroups]);
 
-  // Auto-start logic
+  // Individual Auto-start logic
   useEffect(() => {
-    if (!settings.autoStartTime || !settings.autoStartEnabled || queueStatus !== 'idle') return;
+    if (!settings.individualAutoStartTime || !settings.individualAutoStartEnabled || queueStatus !== 'idle') return;
 
     const timer = setInterval(() => {
       const now = new Date();
-      const scheduledTime = new Date(settings.autoStartTime!);
+      const scheduledTime = new Date(settings.individualAutoStartTime!);
       
       if (now >= scheduledTime) {
-        console.log("[App] Auto-start triggered");
+        console.log("[App] Individual Auto-start triggered");
         startQueue();
         // Disable auto-start after triggering
-        setSettings(prev => ({ ...prev, autoStartEnabled: false }));
+        setSettings(prev => ({ ...prev, individualAutoStartEnabled: false }));
         clearInterval(timer);
       }
-    }, 10000); // Check every 10 seconds
+    }, 10000);
 
     return () => clearInterval(timer);
-  }, [settings.autoStartTime, settings.autoStartEnabled, queueStatus, contacts]);
+  }, [settings.individualAutoStartTime, settings.individualAutoStartEnabled, queueStatus, individualContacts]);
 
-  const filteredContacts = useMemo(() => {
-    return contacts.filter(c => 
+  // Group Auto-start logic
+  useEffect(() => {
+    if (!settings.groupAutoStartTime || !settings.groupAutoStartEnabled || queueStatus !== 'idle') return;
+
+    const timer = setInterval(() => {
+      const now = new Date();
+      const scheduledTime = new Date(settings.groupAutoStartTime!);
+      
+      if (now >= scheduledTime) {
+        console.log("[App] Group Auto-start triggered");
+        startGroupCampaign();
+        // Disable auto-start after triggering
+        setSettings(prev => ({ ...prev, groupAutoStartEnabled: false }));
+        clearInterval(timer);
+      }
+    }, 10000);
+
+    return () => clearInterval(timer);
+  }, [settings.groupAutoStartTime, settings.groupAutoStartEnabled, queueStatus, groupContacts]);
+
+  const filteredIndividualContacts = useMemo(() => {
+    return individualContacts.filter(c => 
       c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       c.phone.includes(searchTerm)
     );
-  }, [contacts, searchTerm]);
+  }, [individualContacts, searchTerm]);
+
+  const filteredGroupContacts = useMemo(() => {
+    return groupContacts.filter(c => 
+      c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.phone.includes(searchTerm)
+    );
+  }, [groupContacts, searchTerm]);
 
   const filteredGroups = useMemo(() => {
     return groups.filter(g => 
@@ -255,13 +295,13 @@ export default function App() {
     
     if (typeof chrome !== 'undefined' && chrome.runtime) {
       // Find the contact or group to get the message/name
-      const contact = contacts.find(c => c.phone === phone);
+      const contact = individualContacts.find(c => c.phone === phone) || groupContacts.find(c => c.phone === phone);
       const group = groups.find(g => g.id === phone);
       
       const targetName = name || contact?.name || group?.subject || "";
       const message = sendDraft ? (contact ? parseTemplate(contact.message_template, contact) : settings.defaultTemplate) : "";
       
-      const isGroup = target.includes('@g.us');
+      const isGroup = target.includes('@g.us') || (contact && groupContacts.some(gc => gc.id === contact.id));
       const fallbackAttachment = isGroup ? settings.groupAttachment : settings.attachment;
 
       chrome.runtime.sendMessage({ 
@@ -316,14 +356,18 @@ export default function App() {
 
       const newContacts: Contact[] = data.map((row: any, idx: number) => ({
         id: crypto.randomUUID(),
-        sr_no: (contacts.length + idx + 1).toString(),
+        sr_no: (activeTab === 'groups' ? groupContacts.length + idx + 1 : individualContacts.length + idx + 1).toString(),
         name: row.Name || row.name || "",
         phone: (row.Phone || row.phone || row['Mobile Number'] || "").toString().trim(),
         message_template: row.Message || row.message || row['Message Template'] || settings.defaultTemplate,
         status: 'pending'
       }));
 
-      setContacts([...contacts, ...newContacts]);
+      if (activeTab === 'groups') {
+        setGroupContacts([...groupContacts, ...newContacts]);
+      } else {
+        setIndividualContacts([...individualContacts, ...newContacts]);
+      }
       toast.success(`Imported ${newContacts.length} contacts`);
     };
     reader.readAsBinaryString(file);
@@ -335,20 +379,25 @@ export default function App() {
   const addRow = () => {
     const newContact: Contact = {
       id: crypto.randomUUID(),
-      sr_no: (contacts.length + 1).toString(),
+      sr_no: (activeTab === 'groups' ? groupContacts.length + 1 : individualContacts.length + 1).toString(),
       name: "",
       phone: "",
       message_template: settings.defaultTemplate,
       status: 'pending'
     };
-    setContacts([...contacts, newContact]);
+    if (activeTab === 'groups') {
+      setGroupContacts([...groupContacts, newContact]);
+    } else {
+      setIndividualContacts([...individualContacts, newContact]);
+    }
   };
 
   /**
    * Updates a specific field for a contact.
    */
   const updateContact = (id: string, field: keyof Contact, value: any) => {
-    setContacts(contacts.map(c => c.id === id ? { ...c, [field]: value } : c));
+    setIndividualContacts(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
+    setGroupContacts(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
   };
 
   /**
@@ -414,16 +463,26 @@ export default function App() {
         }, (response) => {
           setIsScraping(false);
           if (response && response.success) {
+            const isGroupFilter = filterType === 'group';
+            const targetList = isGroupFilter ? groupContacts : individualContacts;
+            
             const newContacts: Contact[] = response.data.map((c: any, idx: number) => ({
               id: crypto.randomUUID(),
-              sr_no: (contacts.length + idx + 1).toString(),
+              sr_no: (targetList.length + idx + 1).toString(),
               name: c.name || "Unknown",
               phone: c.phone || "",
               message_template: settings.defaultTemplate,
+              isGroup: isGroupFilter,
               status: 'pending'
             }));
-            setContacts([...contacts, ...newContacts]);
-            toast.success(`Fetched ${newContacts.length} contacts from sidebar`);
+            
+            if (isGroupFilter) {
+              setGroupContacts(prev => [...prev, ...newContacts]);
+              toast.success(`Fetched ${newContacts.length} groups from sidebar`);
+            } else {
+              setIndividualContacts(prev => [...prev, ...newContacts]);
+              toast.success(`Fetched ${newContacts.length} contacts from sidebar`);
+            }
           } else {
             toast.error(response?.error || "Failed to fetch contacts");
           }
@@ -445,7 +504,7 @@ export default function App() {
           if (response && response.success) {
             const newContacts: Contact[] = response.data.map((c: any, idx: number) => ({
               id: crypto.randomUUID(),
-              sr_no: (contacts.length + idx + 1).toString(),
+              sr_no: (individualContacts.length + idx + 1).toString(),
               name: c.name || "Unknown",
               phone: c.phone || "",
               message_template: settings.defaultTemplate,
@@ -455,7 +514,7 @@ export default function App() {
             if (autoDownload) {
               downloadDataAsCSV(newContacts, `members_${groupName.replace(/\s+/g, '_')}`);
             } else {
-              setContacts(prev => [...prev, ...newContacts]);
+              setIndividualContacts(prev => [...prev, ...newContacts]);
             }
             toast.success(`Scraped ${response.data.length} members from ${groupName} (Fast)`);
           } else {
@@ -469,7 +528,7 @@ export default function App() {
               if (fallbackRes && fallbackRes.success) {
                 const newContacts: Contact[] = fallbackRes.data.map((c: any, idx: number) => ({
                   id: crypto.randomUUID(),
-                  sr_no: (contacts.length + idx + 1).toString(),
+                  sr_no: (individualContacts.length + idx + 1).toString(),
                   name: c.name || "Unknown",
                   phone: c.phone || "",
                   message_template: settings.defaultTemplate,
@@ -479,7 +538,7 @@ export default function App() {
                 if (autoDownload) {
                   downloadDataAsCSV(newContacts, `members_${groupName.replace(/\s+/g, '_')}`);
                 } else {
-                  setContacts(prev => [...prev, ...newContacts]);
+                  setIndividualContacts(prev => [...prev, ...newContacts]);
                 }
                 toast.success(`Scraped ${fallbackRes.data.length} members from ${groupName} (UI Scrape)`);
               } else {
@@ -498,22 +557,23 @@ export default function App() {
       return;
     }
 
-    const groupContacts: Contact[] = selectedGroups.map((groupId, idx) => {
+    const newGroupContacts: Contact[] = selectedGroups.map((groupId, idx) => {
       const group = groups.find(g => g.id === groupId);
       return {
         id: crypto.randomUUID(),
-        sr_no: (contacts.length + idx + 1).toString(),
+        sr_no: (groupContacts.length + idx + 1).toString(),
         name: group?.subject || "Unknown Group",
         phone: group?.id || group?.subject || "", // Prefer ID for direct open
         message_template: settings.defaultTemplate,
+        isGroup: true,
         attachment: settings.groupAttachment, // Use group-specific global attachment
         status: 'pending'
       };
     });
 
-    setContacts(prev => [...prev, ...groupContacts]);
+    setGroupContacts(prev => [...prev, ...newGroupContacts]);
 
-    const preparedContacts = groupContacts.map(c => ({
+    const preparedContacts = newGroupContacts.map(c => ({
       ...c,
       message: parseTemplate(c.message_template, c)
     }));
@@ -529,7 +589,6 @@ export default function App() {
       }, (response) => {
         setQueueStatus('running');
         toast.success("Group campaign started");
-        setActiveTab('contacts'); // Switch to contacts tab to see progress
       });
     }
   };
@@ -554,7 +613,7 @@ export default function App() {
    * Starts the automation queue by sending contacts to the background script.
    */
   const startQueue = () => {
-    const pendingContacts = contacts.filter(c => c.status !== 'sent');
+    const pendingContacts = individualContacts.filter(c => c.status !== 'sent');
     
     if (pendingContacts.length === 0) {
       toast.error("No pending contacts to send");
@@ -563,6 +622,7 @@ export default function App() {
 
     const preparedContacts = pendingContacts.map(c => ({
       ...c,
+      isGroup: false,
       message: parseTemplate(c.message_template, c)
     }));
 
@@ -572,7 +632,7 @@ export default function App() {
         contacts: preparedContacts,
         settings: {
           ...settings,
-          useDirectOpen: settings.useDirectOpen // Ensure this is passed
+          useDirectOpen: false // Individuals use link method usually
         }
       }, (response) => {
         setQueueStatus('running');
@@ -651,7 +711,7 @@ export default function App() {
    * Downloads the current contact list as a CSV file.
    */
   const downloadCSV = () => {
-    downloadDataAsCSV(contacts);
+    downloadDataAsCSV(activeTab === 'groups' ? groupContacts : individualContacts);
   };
 
   const resetSettings = () => {
@@ -660,8 +720,12 @@ export default function App() {
   };
 
   const clearContacts = () => {
-    if (window.confirm("Are you sure you want to clear all contacts?")) {
-      setContacts([]);
+    if (window.confirm(`Are you sure you want to clear all ${activeTab === 'groups' ? 'group' : 'individual'} contacts?`)) {
+      if (activeTab === 'groups') {
+        setGroupContacts([]);
+      } else {
+        setIndividualContacts([]);
+      }
       toast.success("Contacts cleared");
     }
   };
@@ -700,7 +764,7 @@ export default function App() {
             <div className="h-8 w-px bg-slate-200 mx-2" />
             
             {queueStatus === 'idle' || queueStatus === 'stopped' ? (
-              <Button onClick={startQueue} className="gap-2 bg-green-600 hover:bg-green-700 text-white">
+              <Button onClick={activeTab === 'groups' ? startGroupCampaign : startQueue} className="gap-2 bg-green-600 hover:bg-green-700 text-white">
                 <Play className="w-4 h-4" />
                 Start
               </Button>
@@ -757,14 +821,14 @@ export default function App() {
               <Card className="border-none shadow-sm">
                 <CardHeader className="pb-2">
                   <CardDescription className="text-xs uppercase font-bold text-slate-400">Total</CardDescription>
-                  <CardTitle className="text-2xl">{contacts.length}</CardTitle>
+                  <CardTitle className="text-2xl">{individualContacts.length}</CardTitle>
                 </CardHeader>
               </Card>
               <Card className="border-none shadow-sm">
                 <CardHeader className="pb-2">
                   <CardDescription className="text-xs uppercase font-bold text-slate-400">Sent</CardDescription>
                   <CardTitle className="text-2xl text-green-600">
-                    {contacts.filter(c => c.status === 'sent').length}
+                    {individualContacts.filter(c => c.status === 'sent').length}
                   </CardTitle>
                 </CardHeader>
               </Card>
@@ -772,7 +836,7 @@ export default function App() {
                 <CardHeader className="pb-2">
                   <CardDescription className="text-xs uppercase font-bold text-slate-400">Pending</CardDescription>
                   <CardTitle className="text-2xl text-amber-500">
-                    {contacts.filter(c => c.status === 'pending').length}
+                    {individualContacts.filter(c => c.status === 'pending').length}
                   </CardTitle>
                 </CardHeader>
               </Card>
@@ -798,7 +862,7 @@ export default function App() {
                       Add Row
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => {
-                      setContacts(contacts.map(c => ({ ...c, status: 'pending', error: undefined })));
+                      setIndividualContacts(prev => prev.map(c => ({ ...c, status: 'pending', error: undefined })));
                       toast.success("All statuses cleared");
                     }} className="text-slate-500 hover:text-slate-700 gap-1">
                       <RefreshCw className="w-3 h-3" />
@@ -840,7 +904,7 @@ export default function App() {
                     </TableHeader>
                     <TableBody>
                       <AnimatePresence mode="popLayout">
-                        {filteredContacts.map((contact, idx) => (
+                        {filteredIndividualContacts.map((contact, idx) => (
                           <motion.tr
                             key={contact.id}
                             layout
@@ -953,7 +1017,7 @@ export default function App() {
                                   variant="ghost" 
                                   size="icon" 
                                   className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500"
-                                  onClick={() => setContacts(contacts.filter(c => c.id !== contact.id))}
+                                  onClick={() => setIndividualContacts(prev => prev.filter(c => c.id !== contact.id))}
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </Button>
@@ -1184,6 +1248,171 @@ export default function App() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Group Campaign Queue Table */}
+            <Card className="border-none shadow-sm overflow-hidden mt-6">
+              <CardHeader className="bg-white border-b">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <CardTitle className="text-lg font-semibold">Group Campaign Queue</CardTitle>
+                    <Button variant="ghost" size="sm" onClick={addRow} className="text-green-600 hover:text-green-700 hover:bg-green-50 gap-1">
+                      <Plus className="w-4 h-4" />
+                      Add Row
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => {
+                      setGroupContacts(prev => prev.map(c => ({ ...c, status: 'pending', error: undefined })));
+                      toast.success("Group statuses cleared");
+                    }} className="text-slate-500 hover:text-slate-700 gap-1">
+                      <RefreshCw className="w-3 h-3" />
+                      Clear Status
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={downloadCSV} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 gap-1">
+                      <Download className="w-4 h-4" />
+                      Download CSV
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={clearContacts} className="text-red-500 hover:text-red-600 hover:bg-red-50 gap-1">
+                      <Trash2 className="w-3 h-3" />
+                      Clear All
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-slate-50/50">
+                        <TableHead className="w-16">Sr.</TableHead>
+                        <TableHead className="w-48">Group Name</TableHead>
+                        <TableHead className="w-48">Group ID/Name</TableHead>
+                        <TableHead>Message Template</TableHead>
+                        <TableHead className="w-40">Attachment</TableHead>
+                        <TableHead className="w-32">Status</TableHead>
+                        <TableHead className="w-16"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <AnimatePresence mode="popLayout">
+                        {filteredGroupContacts.map((contact, idx) => (
+                          <motion.tr
+                            key={contact.id}
+                            layout
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className={`group transition-colors ${currentIndex === idx ? 'bg-green-50/50' : 'hover:bg-slate-50/50'}`}
+                          >
+                            <TableCell className="font-mono text-xs text-slate-400">
+                              {contact.sr_no}
+                            </TableCell>
+                            <TableCell>
+                              <Input 
+                                value={contact.name} 
+                                onChange={(e) => updateContact(contact.id, 'name', e.target.value)}
+                                className="h-8 border-transparent hover:border-slate-200 focus:border-slate-300 bg-transparent"
+                                placeholder="Group Name"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input 
+                                value={contact.phone} 
+                                onChange={(e) => updateContact(contact.id, 'phone', e.target.value)}
+                                className="h-8 border-transparent hover:border-slate-200 focus:border-slate-300 bg-transparent font-mono"
+                                placeholder="Group ID"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input 
+                                value={contact.message_template} 
+                                onChange={(e) => updateContact(contact.id, 'message_template', e.target.value)}
+                                className="h-8 border-transparent hover:border-slate-200 focus:border-slate-300 bg-transparent text-sm"
+                                placeholder="Message..."
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                {contact.attachment ? (
+                                  <div className="flex items-center gap-1 text-xs bg-slate-100 px-2 py-1 rounded border">
+                                    <FileText className="w-3 h-3 text-slate-400" />
+                                    <span className="truncate max-w-[80px]">{contact.attachment.name}</span>
+                                    <button onClick={() => updateContact(contact.id, 'attachment', undefined)}>
+                                      <X className="w-3 h-3 text-slate-400 hover:text-red-500" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <label className="cursor-pointer text-slate-400 hover:text-slate-600">
+                                    <Paperclip className="w-4 h-4" />
+                                    <input 
+                                      type="file" 
+                                      className="hidden" 
+                                      onChange={(e) => handleFileAttach(contact.id, e)}
+                                    />
+                                  </label>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-col">
+                                <span className={`text-xs font-bold px-2 py-1 rounded-full uppercase tracking-wider w-fit ${
+                                  contact.status === 'read' ? 'bg-blue-100 text-blue-700' :
+                                  contact.status === 'delivered' ? 'bg-indigo-100 text-indigo-700' :
+                                  contact.status === 'sent' ? 'bg-green-100 text-green-700' :
+                                  contact.status === 'failed' ? 'bg-red-100 text-red-700' :
+                                  'bg-slate-100 text-slate-600'
+                                }`}>
+                                  {contact.status}
+                                </span>
+                                {contact.error && (
+                                  <span className="text-[10px] text-red-500 mt-1 truncate max-w-[100px]" title={contact.error}>
+                                    {contact.error}
+                                  </span>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex justify-end gap-2">
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="opacity-0 group-hover:opacity-100 text-blue-500 hover:text-blue-600"
+                                  onClick={() => openDirectChat(contact.phone)}
+                                  title="Direct Open Group"
+                                  disabled={openingChatId === contact.phone}
+                                >
+                                  {openingChatId === contact.phone ? (
+                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <ExternalLink className="w-4 h-4" />
+                                  )}
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="opacity-0 group-hover:opacity-100 text-green-500 hover:text-green-600"
+                                  onClick={() => openDirectChat(contact.phone, true, contact.name)}
+                                  title="Send Drafted Message"
+                                  disabled={openingChatId === contact.phone}
+                                >
+                                  <Send className="w-4 h-4" />
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500"
+                                  onClick={() => setGroupContacts(prev => prev.filter(c => c.id !== contact.id))}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </motion.tr>
+                        ))}
+                      </AnimatePresence>
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
           </div>
         )}
 
@@ -1222,13 +1451,13 @@ export default function App() {
                           if (response && response.success) {
                             const newContacts: Contact[] = response.data.map((c: any, idx: number) => ({
                               id: crypto.randomUUID(),
-                              sr_no: (contacts.length + idx + 1).toString(),
+                              sr_no: (individualContacts.length + idx + 1).toString(),
                               name: c.name || "Unknown",
                               phone: c.phone || "",
                               message_template: settings.defaultTemplate,
                               status: 'pending'
                             }));
-                            setContacts(prev => [...prev, ...newContacts]);
+                            setIndividualContacts(prev => [...prev, ...newContacts]);
                             toast.success(`Captured snapshot of ${newContacts.length} chats`);
                           } else {
                             toast.error(response?.error || "Failed to get chat snapshot");
@@ -1298,7 +1527,7 @@ export default function App() {
                   Reset Defaults
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => {
-                  setContacts(contacts.map(c => ({ ...c, status: 'pending', error: undefined })));
+                  setIndividualContacts(prev => prev.map(c => ({ ...c, status: 'pending', error: undefined })));
                   toast.success("Statuses cleared");
                 }} className="h-8 text-xs gap-1">
                   <RefreshCw className="w-3 h-3" />
@@ -1370,27 +1599,47 @@ export default function App() {
                   <div className="grid gap-2 p-2 bg-blue-50 rounded border border-blue-100">
                     <Label className="text-xs font-bold text-blue-700 flex items-center gap-1">
                       <RefreshCw className="w-3 h-3" />
-                      Auto Start Time
+                      Individual Auto Start
                     </Label>
                     <div className="flex gap-2">
                       <Input 
                         type="datetime-local" 
-                        value={settings.autoStartTime || ""} 
-                        onChange={(e) => setSettings({...settings, autoStartTime: e.target.value})}
+                        value={settings.individualAutoStartTime || ""} 
+                        onChange={(e) => setSettings({...settings, individualAutoStartTime: e.target.value})}
                         className="h-8 bg-white flex-1"
                       />
                       <Button 
                         size="sm" 
-                        variant={settings.autoStartEnabled ? "destructive" : "default"}
+                        variant={settings.individualAutoStartEnabled ? "destructive" : "default"}
                         className="h-8 px-3"
-                        onClick={() => setSettings(prev => ({ ...prev, autoStartEnabled: !prev.autoStartEnabled }))}
+                        onClick={() => setSettings(prev => ({ ...prev, individualAutoStartEnabled: !prev.individualAutoStartEnabled }))}
                       >
-                        {settings.autoStartEnabled ? "Stop" : "Start"}
+                        {settings.individualAutoStartEnabled ? "Stop" : "Start"}
                       </Button>
                     </div>
-                    <p className="text-[10px] text-blue-600">
-                      {settings.autoStartEnabled ? "Auto-start is ACTIVE" : "Automation will start automatically at this time if enabled."}
-                    </p>
+                  </div>
+
+                  <div className="grid gap-2 p-2 bg-indigo-50 rounded border border-indigo-100">
+                    <Label className="text-xs font-bold text-indigo-700 flex items-center gap-1">
+                      <RefreshCw className="w-3 h-3" />
+                      Group Auto Start
+                    </Label>
+                    <div className="flex gap-2">
+                      <Input 
+                        type="datetime-local" 
+                        value={settings.groupAutoStartTime || ""} 
+                        onChange={(e) => setSettings({...settings, groupAutoStartTime: e.target.value})}
+                        className="h-8 bg-white flex-1"
+                      />
+                      <Button 
+                        size="sm" 
+                        variant={settings.groupAutoStartEnabled ? "destructive" : "default"}
+                        className="h-8 px-3"
+                        onClick={() => setSettings(prev => ({ ...prev, groupAutoStartEnabled: !prev.groupAutoStartEnabled }))}
+                      >
+                        {settings.groupAutoStartEnabled ? "Stop" : "Start"}
+                      </Button>
+                    </div>
                   </div>
                 </div>
 
@@ -1445,7 +1694,7 @@ export default function App() {
                   <div className="grid gap-2 p-2 bg-slate-50 rounded border border-slate-100">
                     <Label className="text-xs font-bold text-slate-500 flex items-center gap-1">
                       <Paperclip className="w-3 h-3" />
-                      Global Attachment
+                      Global Attachment (Individual)
                     </Label>
                     <div className="flex items-center gap-2">
                       <Input 
@@ -1463,7 +1712,7 @@ export default function App() {
                                   dataUrl: ev.target?.result as string
                                 }
                               }));
-                              toast.success("Global attachment set");
+                              toast.success("Individual global attachment set");
                             };
                             reader.readAsDataURL(file);
                           }
@@ -1483,6 +1732,51 @@ export default function App() {
                     {settings.attachment && (
                       <p className="text-[10px] text-slate-500 truncate">
                         Selected: {settings.attachment.name}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="grid gap-2 p-2 bg-slate-50 rounded border border-slate-100">
+                    <Label className="text-xs font-bold text-slate-500 flex items-center gap-1">
+                      <Paperclip className="w-3 h-3" />
+                      Global Attachment (Group)
+                    </Label>
+                    <div className="flex items-center gap-2">
+                      <Input 
+                        type="file" 
+                        className="h-8 text-[10px]" 
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = (ev) => {
+                              setSettings(prev => ({
+                                ...prev,
+                                groupAttachment: {
+                                  name: file.name,
+                                  dataUrl: ev.target?.result as string
+                                }
+                              }));
+                              toast.success("Group global attachment set");
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                      {settings.groupAttachment && (
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-8 w-8 text-red-500"
+                          onClick={() => setSettings(prev => ({ ...prev, groupAttachment: undefined }))}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </div>
+                    {settings.groupAttachment && (
+                      <p className="text-[10px] text-slate-500 truncate">
+                        Selected: {settings.groupAttachment.name}
                       </p>
                     )}
                   </div>
