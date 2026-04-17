@@ -720,14 +720,12 @@ export default function App() {
   };
 
   const clearContacts = () => {
-    if (window.confirm(`Are you sure you want to clear all ${activeTab === 'groups' ? 'group' : 'individual'} contacts?`)) {
-      if (activeTab === 'groups') {
-        setGroupContacts([]);
-      } else {
-        setIndividualContacts([]);
-      }
-      toast.success("Contacts cleared");
+    if (activeTab === 'groups') {
+      setGroupContacts([]);
+    } else {
+      setIndividualContacts([]);
     }
+    toast.success("Contacts cleared");
   };
 
   return (
@@ -1226,17 +1224,7 @@ export default function App() {
                                   className="text-blue-600 border-blue-200 hover:bg-blue-50"
                                 >
                                   <Users className="w-3 h-3 mr-1" />
-                                  Scrape
-                                </Button>
-                                <Button 
-                                  variant="outline" 
-                                  size="sm" 
-                                  onClick={() => scrapeGroupMembers(group.id, group.subject, true)}
-                                  disabled={isScraping}
-                                  className="text-green-600 border-green-200 hover:bg-green-50"
-                                >
-                                  <Download className="w-3 h-3 mr-1" />
-                                  Scrape & Download
+                                  Scrape Members
                                 </Button>
                               </div>
                             </TableCell>
@@ -1497,12 +1485,11 @@ export default function App() {
                   </Button>
                   <Button 
                     variant="outline"
-                    className="w-full border-green-200 text-green-700 hover:bg-green-50" 
-                    onClick={() => scrapeGroupMembers("", "", true)}
-                    disabled={isScraping}
+                    className="w-full border-blue-200 text-blue-700 hover:bg-blue-50" 
+                    onClick={() => downloadCSV()}
                   >
                     <Download className="w-4 h-4 mr-2" />
-                    Scrape & Download CSV
+                    Download Current List (CSV)
                   </Button>
                 </div>
                 <p className="text-xs text-slate-500">

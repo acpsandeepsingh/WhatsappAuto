@@ -270,27 +270,24 @@ async function injectMessage(text) {
 
 async function verifyMessageSent() {
   console.log("[WhatsApp Automation] Verifying message status...");
-  // Wait up to 15 seconds for a status icon to appear on the last outgoing message
-  // We use a longer timeout because "Delivered" or "Read" might take a moment
+  // Wait up to 10 seconds for a status icon to appear on the last outgoing message
   let lastStatus = "Sent"; 
   
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 20; i++) {
     const lastMsg = document.querySelector('div.message-out:last-child, [data-testid="msg-container"]:last-child');
     if (lastMsg) {
       const statusIcon = lastMsg.querySelector('span[data-icon="msg-check"], span[data-icon="msg-dblcheck"]');
       if (statusIcon) {
         const label = statusIcon.getAttribute('aria-label') || "";
-        if (label.includes("Read")) return "Read";
-        if (label.includes("Delivered")) return "Delivered";
-        if (label.includes("Sent")) lastStatus = "Sent";
+        console.log(`[WhatsApp Automation] Found status icon with label: "${label}"`);
+        if (label.includes("Read")) return "read";
+        if (label.includes("Delivered")) return "delivered";
+        if (label.includes("Sent")) return "sent";
       }
     }
     await sleep(500);
-    // If we already saw "Sent", we can wait a bit more to see if it turns to "Delivered"
-    // but we don't want to block the whole queue for too long.
-    if (i > 10 && lastStatus === "Sent") break; 
   }
-  return lastStatus;
+  return lastStatus.toLowerCase();
 }
 
 async function handleAttachment(attachment, caption = "", isGroup = false) {
