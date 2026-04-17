@@ -293,7 +293,7 @@ async function verifyMessageSent() {
   return lastStatus;
 }
 
-async function handleAttachment(attachment, caption = "") {
+async function handleAttachment(attachment, caption = "", isGroup = false) {
   if (!attachment || !attachment.dataUrl) return true;
   const messageBox = await waitForElement(SELECTORS.messageBox);
   if (!messageBox) throw new Error("Message box not found");
@@ -316,9 +316,9 @@ async function handleAttachment(attachment, caption = "") {
       cb.dispatchEvent(new Event('input', { bubbles: true }));
       
       // Verify text injection
-      await sleep(500);
+      await sleep(1000);
       const currentText = cb.textContent || "";
-      if (!currentText.includes(caption.substring(0, 10))) {
+      if (!currentText.includes(caption.substring(0, 5))) {
         console.log("[WhatsApp Automation] Text injection verification failed, retrying...");
         cb.focus();
         document.execCommand('selectAll', false, null);
@@ -331,7 +331,8 @@ async function handleAttachment(attachment, caption = "") {
   // Wait for attachment to be fully loaded (indicated by the presence of ic-close title in SVG)
   console.log("[WhatsApp Automation] Waiting for attachment to load...");
   let loaded = false;
-  for (let i = 0; i < 60; i++) { // Wait up to 30 seconds for large files
+  const maxWait = isGroup ? 120 : 60; // 60 seconds for groups, 30 for individuals
+  for (let i = 0; i < maxWait; i++) {
     const titles = document.querySelectorAll('title');
     for (const t of titles) {
       if (t.textContent === 'ic-close') {
@@ -344,15 +345,17 @@ async function handleAttachment(attachment, caption = "") {
   }
   
   if (!loaded) {
+    if (isGroup) throw new Error("Attachment failed to load within timeout (Group Campaign Safety)");
     console.warn("[WhatsApp Automation] Attachment load indicator (ic-close) not found, but trying to send anyway.");
   } else {
     console.log("[WhatsApp Automation] Attachment loaded successfully.");
-    await sleep(1000); // Wait for animations
+    await sleep(isGroup ? 2000 : 1000); // Extra wait for group animations
   }
 
   // Use more robust send button detection same as injectMessage
   let sendBtn = null;
-  for (let i = 0; i < 20; i++) {
+  const maxBtnWait = isGroup ? 30 : 20;
+  for (let i = 0; i < maxBtnWait; i++) {
     sendBtn = document.querySelector(SELECTORS.sendBtn) || document.querySelector('[data-testid="send"]') || document.querySelector('[data-icon="send"]');
     if (sendBtn) {
       const parentButton = sendBtn.closest('button') || sendBtn.closest('[role="button"]');
@@ -365,9 +368,10 @@ async function handleAttachment(attachment, caption = "") {
   if (sendBtn) {
     console.log("[WhatsApp Automation] Clicking attachment send button");
     sendBtn.click();
-    await sleep(500);
+    await sleep(1000);
     // fallback if still there
     if (document.querySelector(SELECTORS.sendBtn)) {
+       console.log("[WhatsApp Automation] Send button still present, clicking again");
        sendBtn.click();
     }
     await sleep(automationSettings.sendDelay);
@@ -380,7 +384,7 @@ async function handleAttachment(attachment, caption = "") {
   const capBox = document.querySelector(SELECTORS.captionBox);
   if (capBox) {
     capBox.dispatchEvent(new KeyboardEvent('keydown', eventOptions));
-    await sleep(1000);
+    await sleep(1500);
     return await verifyMessageSent();
   }
   
@@ -437,12 +441,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         let status = "sent";
+        const isGroup = request.data.isGroup || phone.includes('@g.us');
+        
         if (attachment) {
-          await handleAttachment(attachment, message);
-          status = await verifyMessageSent();
+          status = await handleAttachment(attachment, message, isGroup);
         } else if (message) {
-          await injectMessage(message);
-          status = await verifyMessageSent();
+          status = await injectMessage(message);
         }
         sendResponse({ success: true, status: status.toLowerCase() });
       } catch (e) {
