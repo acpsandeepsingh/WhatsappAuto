@@ -204,31 +204,35 @@ async function injectMessage(text) {
   const isPlaceholder = currentText === placeholder;
   
   console.log(`[WhatsApp Automation] Current text in box: "${currentText}"`);
-  
-  if (currentText.length < 2 || isPlaceholder) { 
-    console.log("[WhatsApp Automation] Message box empty or placeholder, typing message...");
-    // Clear first to be safe
-    document.execCommand('selectAll', false, null);
-    document.execCommand('delete', false, null);
-    await sleep(1000);
-    
-    document.execCommand('insertText', false, text);
-    messageBox.dispatchEvent(new Event('input', { bubbles: true }));
-    await sleep(automationSettings.pasteDelay);
+    if (currentText.length < 2 || isPlaceholder) { 
+        console.log("[WhatsApp Automation] Message box empty or placeholder, typing message...");
+        // Clear first to be safe
+        document.execCommand('selectAll', false, null);
+        document.execCommand('delete', false, null);
+        await sleep(1000);
+        
+        document.execCommand('insertText', false, text);
+        messageBox.dispatchEvent(new Event('input', { bubbles: true }));
+        await sleep(automationSettings.pasteDelay);
 
-    // Verify text injection
-    const verifiedText = (messageBox.innerText || messageBox.textContent || "").trim();
-    if (!verifiedText.includes(text.substring(0, 10)) && verifiedText !== text) {
-      console.log("[WhatsApp Automation] Text injection verification failed in message box, retrying...");
-      messageBox.focus();
-      document.execCommand('selectAll', false, null);
-      document.execCommand('insertText', false, text);
-      messageBox.dispatchEvent(new Event('input', { bubbles: true }));
-      await sleep(1000);
+        // Verify text injection
+        const verifiedText = (messageBox.innerText || messageBox.textContent || "").trim();
+        if (!verifiedText.includes(text.substring(0, 5)) && verifiedText !== text) {
+            console.log("[WhatsApp Automation] Text injection verification failed, retrying...");
+            messageBox.focus();
+            document.execCommand('selectAll', false, null);
+            document.execCommand('insertText', false, text);
+            messageBox.dispatchEvent(new Event('input', { bubbles: true }));
+            await sleep(1500);
+            
+            const finalVerify = (messageBox.innerText || messageBox.textContent || "").trim();
+            if (!finalVerify.includes(text.substring(0, 3))) {
+                throw new Error("Failed to inject text message after retry");
+            }
+        }
+    } else {
+        console.log("[WhatsApp Automation] Message box already has text, skipping typing");
     }
-  } else {
-    console.log("[WhatsApp Automation] Message box already has text, skipping typing");
-  }
 
   // Try clicking the send button first (more reliable than Enter key)
   let sendBtn = null;
@@ -247,47 +251,80 @@ async function injectMessage(text) {
     console.log("[WhatsApp Automation] Clicking send button");
     sendBtn.click();
     
-    // Sometimes a single click isn't enough or needs a small delay
-    await sleep(500);
-    if (document.querySelector(SELECTORS.sendBtn)) {
-       // If button still exists, try one more time or use Enter
-       sendBtn.click();
+    // Wait for the message to leave the input box
+    let cleared = false;
+    for (let i = 0; i < 10; i++) {
+        const textInBox = (messageBox.innerText || messageBox.textContent || "").trim();
+        if (textInBox.length < 5) {
+            cleared = true;
+            break;
+        }
+        await sleep(500);
+        if (document.querySelector(SELECTORS.sendBtn)) {
+            sendBtn.click(); // Re-click if still there
+        }
+    }
+    
+    if (!cleared) {
+        console.warn("[WhatsApp Automation] Message box not cleared after send attempts");
     }
   } else {
     console.log("[WhatsApp Automation] Send button not found, trying Enter key");
     const eventOptions = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
     messageBox.dispatchEvent(new KeyboardEvent('keydown', eventOptions));
-    messageBox.dispatchEvent(new KeyboardEvent('keypress', eventOptions));
-    messageBox.dispatchEvent(new KeyboardEvent('keyup', eventOptions));
+    await sleep(500);
   }
   
   await sleep(automationSettings.sendDelay);
   
-  // Verification step: Wait for the message to actually leave the box and show a status icon
-  const sent = await verifyMessageSent();
-  return sent;
+  const status = await verifyMessageSent();
+  if (status === "failed") {
+      // Clear box for retry if it's still there
+      const stillThere = (messageBox.innerText || messageBox.textContent || "").trim();
+      if (stillThere.length > 5) {
+          console.log("[WhatsApp Automation] Message failed to send, clearing box");
+          messageBox.focus();
+          document.execCommand('selectAll', false, null);
+          document.execCommand('delete', false, null);
+      }
+  }
+  return status;
 }
 
 async function verifyMessageSent() {
   console.log("[WhatsApp Automation] Verifying message status...");
   // Wait up to 10 seconds for a status icon to appear on the last outgoing message
-  let lastStatus = "Sent"; 
   
   for (let i = 0; i < 20; i++) {
-    const lastMsg = document.querySelector('div.message-out:last-child, [data-testid="msg-container"]:last-child');
+    // Try to find the last message with a precise selector
+    const outMsgs = document.querySelectorAll('div.message-out, [data-testid="msg-container"]:has(div.message-out), [data-testid="msg-container"]:has([data-icon="msg-check"])');
+    const lastMsg = outMsgs.length > 0 ? outMsgs[outMsgs.length - 1] : null;
+    
     if (lastMsg) {
-      const statusIcon = lastMsg.querySelector('span[data-icon="msg-check"], span[data-icon="msg-dblcheck"]');
+      // Check for any checkmark icon
+      const statusIcon = lastMsg.querySelector('span[data-icon="msg-check"], span[data-icon="msg-dblcheck"], span[data-icon="msg-time"]');
       if (statusIcon) {
+        const iconName = statusIcon.getAttribute('data-icon') || "";
         const label = statusIcon.getAttribute('aria-label') || "";
-        console.log(`[WhatsApp Automation] Found status icon with label: "${label}"`);
-        if (label.includes("Read")) return "read";
-        if (label.includes("Delivered")) return "delivered";
-        if (label.includes("Sent")) return "sent";
+        
+        console.log(`[WhatsApp Automation] Found status icon: ${iconName}, label: "${label}"`);
+        
+        if (iconName === 'msg-time') {
+            // Still sending...
+            console.log("[WhatsApp Automation] Message still clocking...");
+        } else {
+            // Found a checkmark!
+            if (label.includes("Read")) return "read";
+            if (label.includes("Delivered")) return "delivered";
+            return "sent";
+        }
       }
     }
     await sleep(500);
   }
-  return lastStatus.toLowerCase();
+  
+  console.log("[WhatsApp Automation] Status verification timeout - no checkmarks found");
+  return "failed";
 }
 
 async function handleAttachment(attachment, caption = "", isGroup = false) {
@@ -365,14 +402,31 @@ async function handleAttachment(attachment, caption = "", isGroup = false) {
   if (sendBtn) {
     console.log("[WhatsApp Automation] Clicking attachment send button");
     sendBtn.click();
-    await sleep(1000);
-    // fallback if still there
-    if (document.querySelector(SELECTORS.sendBtn)) {
-       console.log("[WhatsApp Automation] Send button still present, clicking again");
-       sendBtn.click();
+    
+    // Wait for the preview to close (indicates it was submitted)
+    let submitted = false;
+    for (let i = 0; i < 20; i++) {
+        const stillPreview = document.querySelector('[data-testid="send"]') || document.querySelector('[data-icon="send"]');
+        if (!stillPreview) {
+            submitted = true;
+            break;
+        }
+        await sleep(500);
+        if (i % 5 === 0 && stillPreview) {
+            console.log("[WhatsApp Automation] Still in preview, clicking send again...");
+            stillPreview.click();
+        }
     }
+
     await sleep(automationSettings.sendDelay);
     const status = await verifyMessageSent();
+    
+    if (status === "failed") {
+        console.log("[WhatsApp Automation] Attachment send failed/timeout, closing preview for retry safety");
+        const closeBtn = document.querySelector('[data-testid="x-viewer"]') || document.querySelector('[data-icon="x-viewer"]') || document.querySelector('[data-icon="x"]');
+        if (closeBtn) closeBtn.click();
+    }
+    
     return status;
   }
   

@@ -179,6 +179,7 @@
                             rawList = allChats.filter(c => 
                                 c.unreadCount > 0 || 
                                 c.hasUnread || 
+                                c.isUnread || 
                                 c.isUnreadType || 
                                 (c.id && c.id._serialized && c.unreadCount > 0)
                             );
@@ -190,7 +191,7 @@
                             rawList = allContacts.filter(c => 
                                 c.isMyContact || 
                                 c.isAddressBookContact || 
-                                (c.name && !c.isGroup && !c.id.includes('@g.us'))
+                                (c.name && !c.isGroup && (!c.id || !c.id.includes('@g.us')))
                             );
                         } else {
                             rawList = allChats;
@@ -200,8 +201,7 @@
                         console.log("WhatsApp Automation: Falling back to contact store for filter:", filter.primary);
                         const rows = await getFromIndexedDB("model-storage", "contact");
                         if (filter.primary === 'unread_chats') {
-                            // IndexedDB might not have unread status easily, so we just return all for now or empty
-                            rawList = []; 
+                            rawList = rows.filter(c => c.unreadCount > 0 || c.hasUnread); 
                         } else if (filter.primary === 'group') {
                             rawList = rows.filter(c => c.id && c.id.includes('@g.us'));
                         } else if (filter.primary === 'saved_contacts') {
@@ -225,12 +225,12 @@
                         };
                     }).filter(c => {
                         // Filter out non-numeric phone numbers unless it's a group
-                        const isGroup = c.id.includes('@g.us');
+                        const isGroup = c.id && c.id.includes('@g.us');
                         if (isGroup) return true;
                         
-                        // Valid mobile numbers are usually 8-15 digits
-                        // If it's too long (like an internal ID), we skip it
-                        return /^\d{8,15}$/.test(c.phone);
+                        // Valid mobile numbers are usually 8-14 digits
+                        // 15 digits or more are often internal IDs or service numbers
+                        return /^\d{8,14}$/.test(c.phone);
                     });
 
                     // Deduplicate by phone number mainly, but keep groups separate
