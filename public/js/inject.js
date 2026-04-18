@@ -228,9 +228,9 @@
                         const isGroup = c.id && c.id.includes('@g.us');
                         if (isGroup) return true;
                         
-                        // Valid mobile numbers are usually 8-14 digits
-                        // 15 digits or more are often internal IDs or service numbers
-                        return /^\d{8,14}$/.test(c.phone);
+                        // Valid mobile numbers are usually 8-13 digits
+                        // 14 digits or more are often internal IDs or service numbers
+                        return /^\d{8,13}$/.test(c.phone);
                     });
 
                     // Deduplicate by phone number mainly, but keep groups separate

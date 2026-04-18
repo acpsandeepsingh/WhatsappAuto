@@ -294,7 +294,6 @@ async function injectMessage(text) {
 async function verifyMessageSent() {
   console.log("[WhatsApp Automation] Verifying message status...");
   // Wait up to 10 seconds for a status icon to appear on the last outgoing message
-  
   for (let i = 0; i < 20; i++) {
     // Try to find the last message with a precise selector
     const outMsgs = document.querySelectorAll('div.message-out, [data-testid="msg-container"]:has(div.message-out), [data-testid="msg-container"]:has([data-icon="msg-check"])');
@@ -382,7 +381,21 @@ async function handleAttachment(attachment, caption = "", isGroup = false) {
     if (isGroup) throw new Error("Attachment failed to load within timeout (Group Campaign Safety)");
     console.warn("[WhatsApp Automation] Attachment load indicator (ic-close) not found, but trying to send anyway.");
   } else {
-    console.log("[WhatsApp Automation] Attachment loaded successfully.");
+    console.log(`[WhatsApp Automation] Attachment loaded successfully....*.here check first to is msg injucted successfully................*`);
+    if (caption) {
+        const cb = document.querySelector(SELECTORS.captionBox);
+        const currentText = (cb ? (cb.innerText || cb.textContent || "") : "").trim();
+        if (!currentText.includes(caption.substring(0, 3))) {
+            console.log("[WhatsApp Automation] Caption injection verification failed before send, retrying...");
+            if (cb) {
+                cb.focus();
+                document.execCommand('selectAll', false, null);
+                document.execCommand('insertText', false, caption);
+                cb.dispatchEvent(new Event('input', { bubbles: true }));
+                await sleep(1000);
+            }
+        }
+    }
     await sleep(isGroup ? 2000 : 1000); // Extra wait for group animations
   }
 

@@ -1133,21 +1133,48 @@ export default function App() {
             <Card className="border-none shadow-sm">
               <CardHeader className="border-b">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div className="flex items-center gap-4">
-                    <CardTitle className="text-lg">Select Groups ({selectedGroups.length} selected)</CardTitle>
-                    <Button variant="ghost" size="sm" onClick={() => {
-                      const filteredIds = filteredGroups.map(g => g.id);
-                      const allFilteredSelected = filteredIds.every(id => selectedGroups.includes(id));
-                      
-                      if (allFilteredSelected) {
-                        setSelectedGroups(prev => prev.filter(id => !filteredIds.includes(id)));
-                      } else {
-                        setSelectedGroups(prev => Array.from(new Set([...prev, ...filteredIds])));
-                      }
-                    }}>
-                      {filteredGroups.every(g => selectedGroups.includes(g.id)) ? "Deselect All" : "Select All"}
-                    </Button>
-                  </div>
+                    <div className="flex items-center gap-4">
+                      <CardTitle className="text-lg">Select Groups ({selectedGroups.length} selected)</CardTitle>
+                      <Button variant="ghost" size="sm" onClick={() => {
+                        const filteredIds = filteredGroups.map(g => g.id);
+                        const allFilteredSelected = filteredIds.every(id => selectedGroups.includes(id));
+                        
+                        if (allFilteredSelected) {
+                          setSelectedGroups(prev => prev.filter(id => !filteredIds.includes(id)));
+                        } else {
+                          setSelectedGroups(prev => Array.from(new Set([...prev, ...filteredIds])));
+                        }
+                      }}>
+                        {filteredGroups.every(g => selectedGroups.includes(g.id)) ? "Deselect All" : "Select All"}
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => {
+                          if (selectedGroups.length === 0) {
+                            toast.error("No groups selected");
+                            return;
+                          }
+                          const newGroupContacts = selectedGroups.map((groupId, idx) => {
+                            const group = groups.find(g => g.id === groupId);
+                            return {
+                              id: Math.random().toString(36).substr(2, 9),
+                              sr_no: (groupContacts.length + idx + 1).toString(),
+                              name: group?.subject || "Unknown Group",
+                              phone: group?.id || "",
+                              message_template: settings.defaultTemplate || "Hello!",
+                              status: 'pending'
+                            };
+                          });
+                          setGroupContacts(prev => [...prev, ...newGroupContacts]);
+                          toast.success(`Added ${selectedGroups.length} groups to queue`);
+                        }}
+                        className="text-green-600 border-green-200 hover:bg-green-50 gap-1"
+                      >
+                        <Plus className="w-3 h-3" />
+                        Add to Group Campaign Queue
+                      </Button>
+                    </div>
                   <div className="relative w-full md:w-80">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <Input 
